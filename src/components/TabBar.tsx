@@ -9,6 +9,25 @@ const tabs = [
   { name: 'settings', title: 'Settings', label: 'Settings', icon: IconSettings },
 ]
 
+// Map every screen to the tab that should appear active for it.
+const tabOf: Record<string, string> = {
+  home: 'home',
+  containers: 'containers',
+  'container-detail': 'containers',
+  'container-logs': 'containers',
+  'container-stats': 'containers',
+  'create-container': 'containers',
+  images: 'containers',
+  stacks: 'stacks',
+  'stack-detail': 'stacks',
+  'stack-edit': 'stacks',
+  'stack-file': 'stacks',
+  'deploy-stack': 'stacks',
+  networks: 'networks',
+  settings: 'settings',
+  'schema-settings': 'settings',
+}
+
 export function TabBar() {
   const screen = useApp((s) => s.screen)
   const navigate = useApp((s) => s.navigate)
@@ -16,7 +35,7 @@ export function TabBar() {
 
   if (!ready) return null
 
-  const active = tabs.find((t) => t.name === screen.name)?.name || 'home'
+  const active = tabOf[screen.name] || 'home'
 
   return (
     <nav className="tabbar">
