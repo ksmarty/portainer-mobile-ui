@@ -3,7 +3,7 @@ import { useApp } from '../store'
 import { IconPlus, IconTrash, IconUser } from '../components/Icons'
 import { Empty, ListItem, Pill, Skeleton } from '../components/ui'
 import { roleName } from '../lib/utils'
-import { ConfirmModal } from './Images'
+import { ConfirmModal } from '../components/ConfirmModal'
 
 export function UsersScreen() {
   const users = useApp((s) => s.users)

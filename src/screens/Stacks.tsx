@@ -3,7 +3,7 @@ import { useApp } from '../store'
 import { IconPlus, IconStack, IconTrash } from '../components/Icons'
 import { Empty, ListItem, Pill, Skeleton } from '../components/ui'
 import { timeAgo } from '../lib/utils'
-import { ConfirmModal } from './Images'
+import { ConfirmModal } from '../components/ConfirmModal'
 
 export function StacksScreen() {
   const stacks = useApp((s) => s.stacks)

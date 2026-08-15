@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useApp } from '../store'
 import { IconNetwork, IconTrash } from '../components/Icons'
 import { Empty, ListItem, Pill, Skeleton } from '../components/ui'
-import { ConfirmModal } from './Images'
+import { ConfirmModal } from '../components/ConfirmModal'
 
 export function NetworksScreen() {
   const networks = useApp((s) => s.networks)

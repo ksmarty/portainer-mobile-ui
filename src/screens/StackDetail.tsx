@@ -4,7 +4,7 @@ import { IconBox, IconEdit, IconFile, IconPlay, IconStack, IconStop, IconTrash }
 import { Empty, KV, Pill, SectionTitle, Tag } from '../components/ui'
 import { portLabel, stateColor, stateLabel, timeAgo } from '../lib/utils'
 import type { Container } from '../lib/types'
-import { ConfirmModal } from './Images'
+import { ConfirmModal } from '../components/ConfirmModal'
 
 export function StackDetailScreen({ id, fileOverride }: { id: number; fileOverride?: string }) {
   const stacks = useApp((s) => s.stacks)

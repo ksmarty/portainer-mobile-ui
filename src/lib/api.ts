@@ -337,6 +337,24 @@ export function getImages(endpointId: number): Promise<Image[]> {
   return portainerFetch<Image[]>(dockerPath(endpointId, '/images/json')).then((d) => setCache(key, d, 5000))
 }
 
+export function getDanglingImages(endpointId: number): Promise<Image[]> {
+  if (isDemo()) return demoDelay(demoDanglingImages())
+  return portainerFetch<Image[]>(dockerPath(endpointId, '/images/json'), undefined, {
+    all: 1,
+    filters: JSON.stringify({ dangling: ['true'] }),
+  })
+}
+
+export function pruneImages(endpointId: number): Promise<{ deleted: number; reclaimed: number }> {
+  if (isDemo()) return demoDelay(demoPruneImages(), 400)
+  return portainerFetch<any>(dockerPath(endpointId, '/images/prune'), { method: 'POST' }, {
+    filters: JSON.stringify({ dangling: ['true'] }),
+  }).then((d) => ({
+    deleted: d?.ImagesDeleted?.length ?? 0,
+    reclaimed: d?.SpaceReclaimed ?? 0,
+  }))
+}
+
 export function removeImage(endpointId: number, id: string, force = false): Promise<void> {
   if (isDemo()) {
     demoRemoveImage(id)

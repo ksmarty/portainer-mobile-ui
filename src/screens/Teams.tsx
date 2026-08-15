@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useApp } from '../store'
 import { IconPlus, IconTrash, IconUsers } from '../components/Icons'
 import { Empty, ListItem, Skeleton } from '../components/ui'
-import { ConfirmModal } from './Images'
+import { ConfirmModal } from '../components/ConfirmModal'
 
 export function TeamsScreen() {
   const teams = useApp((s) => s.teams)

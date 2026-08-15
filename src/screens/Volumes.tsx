@@ -3,7 +3,7 @@ import { useApp } from '../store'
 import { IconDatabase, IconTrash } from '../components/Icons'
 import { Empty, ListItem, Skeleton } from '../components/ui'
 import { bytes } from '../lib/utils'
-import { ConfirmModal } from './Images'
+import { ConfirmModal } from '../components/ConfirmModal'
 
 export function VolumesScreen() {
   const volumes = useApp((s) => s.volumes)
