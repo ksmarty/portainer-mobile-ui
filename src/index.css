@@ -830,6 +830,14 @@ a {
   -webkit-text-fill-color: #5a6480;
 }
 
+.code-editor-textarea {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.code-editor-textarea::-webkit-scrollbar {
+  display: none;
+}
+
 .editor-suggest {
   position: fixed;
   z-index: 100;
