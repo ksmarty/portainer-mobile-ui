@@ -60,9 +60,7 @@ export function HomeScreen() {
         </div>
       </div>
 
-      <SectionTitle link="View all" onLink={() => navigate({ name: 'containers', title: 'Containers' })}>
-        Resources
-      </SectionTitle>
+      <SectionTitle>Resources</SectionTitle>
 
       <div className="stat-grid">
         <Stat
