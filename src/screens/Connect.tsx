@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useApp } from '../store'
 import { IconBox, IconKey } from '../components/Icons'
 import { Spinner } from '../components/ui'
+import { getConfig } from '../lib/api'
 
 export function ConnectScreen() {
   const connect = useApp((s) => s.connect)
@@ -9,9 +10,11 @@ export function ConnectScreen() {
   const loading = useApp((s) => s.loading)
   const error = useApp((s) => s.error)
 
-  const [url, setUrl] = useState('https://portainer.example.com')
-  const [token, setToken] = useState('')
-  const [isJwt, setIsJwt] = useState(false)
+  // Prefill from a previously saved connection so reconnecting is one tap
+  const saved = getConfig()
+  const [url, setUrl] = useState(saved.url || 'https://portainer.example.com')
+  const [token, setToken] = useState(saved.token || '')
+  const [isJwt, setIsJwt] = useState(saved.isJwt)
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -73,7 +76,7 @@ export function ConnectScreen() {
           />
           <div className="hint">
             <IconKey size={12} style={{ verticalAlign: -2 }} /> Create an access token in Portainer → My account → Access
-            tokens.
+            tokens. The app appends <code>/api</code> to the URL automatically.
           </div>
         </div>
 

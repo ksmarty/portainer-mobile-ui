@@ -116,10 +116,18 @@ function demoDelay<T>(value: T, ms = 140): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(jsonClone(value) as T), ms))
 }
 
+// Portainer's REST API lives under /api. Accept a host with or without the
+// prefix and always normalize to include it (e.g. https://portainer.example.com
+// -> https://portainer.example.com/api).
+function apiBase(url: string): string {
+  const u = url.replace(/\/+$/, '')
+  return /\/api$/i.test(u) ? u : `${u}/api`
+}
+
 async function portainerFetch<T>(path: string, options: RequestInit = {}, params?: Record<string, unknown>): Promise<T> {
   const cfg = getConfig()
   if (!cfg.url) throw new ApiError('No Portainer URL configured. Add a connection in Settings.', 0)
-  const base = cfg.url.replace(/\/+$/, '')
+  const base = apiBase(cfg.url)
   const qs = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : ''
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -134,10 +142,16 @@ async function portainerFetch<T>(path: string, options: RequestInit = {}, params
   try {
     res = await fetch(base + path + qs, { ...options, headers })
   } catch (e) {
-    throw new ApiError(`Cannot reach Portainer at ${cfg.url}. Check the URL and your network.`, 0)
+    throw new ApiError(
+      `Cannot reach ${cfg.url}. Check the URL and your network. If this app is hosted on a different origin, Portainer must allow CORS — or run it behind the container's /api proxy (PORTAINER_URL).`,
+      0,
+    )
   }
   if (!res.ok) {
     const text = await res.text().catch(() => '')
+    if (res.status === 401 || res.status === 403) {
+      throw new ApiError(`Authentication failed (${res.status}) — check your API key or JWT.`, res.status)
+    }
     throw new ApiError(text || `Request failed (${res.status})`, res.status)
   }
   if (res.status === 204) return undefined as T
@@ -154,7 +168,7 @@ function dockerPath(endpointId: number, path: string): string {
 
 export async function apiLogin(username: string, password: string): Promise<AuthResponse> {
   const cfg = getConfig()
-  const res = await fetch(cfg.url.replace(/\/+$/, '') + '/auth', {
+  const res = await fetch(apiBase(cfg.url) + '/auth', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),

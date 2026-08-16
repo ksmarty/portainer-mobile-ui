@@ -234,7 +234,10 @@ export const useApp = create<AppState>((set, get) => ({
         }
       }
     } catch (e) {
-      set({ demo: true, ready: true, booting: false })
+      // Never force demo mode back on: if a real connection fails, keep the
+      // user's choice (demo off) and show the Connect screen instead.
+      const demo = get().demo
+      set({ demo, ready: true, booting: false })
       get().toast('Failed to load: ' + (e as Error).message, 'error')
     }
   },
@@ -297,8 +300,34 @@ export const useApp = create<AppState>((set, get) => ({
   toggleDemo: () => {
     const next = !get().demo
     setDemoMode(next)
-    set({ ready: false, demo: next, screen: HOME, history: [] })
-    get().boot()
+    if (next) {
+      set({ ready: false, demo: true, screen: HOME, history: [] })
+      get().boot()
+    } else {
+      // Leaving demo: disconnect immediately (keep saved config so the
+      // Connect screen can prefill, but drop the live session).
+      clearCache()
+      set({
+        demo: false,
+        ready: true,
+        user: null,
+        activeEndpoint: 0,
+        endpoints: [],
+        containers: [],
+        images: [],
+        volumes: [],
+        networks: [],
+        stacks: [],
+        users: [],
+        teams: [],
+        registries: [],
+        settings: null,
+        dashboard: null,
+        screen: HOME,
+        history: [],
+      })
+      get().toast('Demo mode off — connect to a Portainer instance', 'info')
+    }
   },
 
   selectEndpoint: (id) => {
