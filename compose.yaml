@@ -3,11 +3,25 @@ services:
     build: .
     image: portainer-mobile:latest
     container_name: portainer-mobile
+    # Direct access on :8080 (optional). Remove if Traefik is the only ingress.
     ports:
       - "8080:80"
     environment:
-      # Optional: reverse-proxy /api/* to a Portainer instance so the UI can
-      # talk to it same-origin (avoids CORS). If unset, the container just
-      # serves the UI and you enter the Portainer URL + API key in the app.
-      # PORTAINER_URL: "https://portainer.example.com"
+      # Same-origin proxy: the container's nginx forwards /api/* to Portainer
+      # server-side, so the browser never calls a different origin (no CORS).
+      # Set this to your Portainer URL, then in the app connect with THIS
+      # app's own URL (pm.notato.xyz), not the Portainer URL.
+      PORTAINER_URL: "https://portainer.notato.xyz"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.portainer-mobile.rule=Host(`pm.notato.xyz`)
+      - traefik.http.routers.portainer-mobile.entrypoints=websecure
+      - traefik.http.routers.portainer-mobile.tls.certresolver=letsencrypt
+      - traefik.http.services.portainer-mobile.loadbalancer.server.port=80
+    networks:
+      - traefik
     restart: unless-stopped
+
+networks:
+  traefik:
+    external: true

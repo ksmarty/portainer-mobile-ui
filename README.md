@@ -39,11 +39,11 @@ docker run -d --name portainer-mobile -p 8080:80 \
   portainer-mobile
 ```
 
-### Behind Traefik (or any reverse proxy)
+### Behind Traefik (Docker provider / labels)
 
 If the app and Portainer live on **different origins** (different domains), the browser blocks the direct cross-origin calls unless Portainer allows CORS. Two options:
 
-**Option 1 — same-origin proxy (recommended):** set `PORTAINER_URL` in `compose.yaml`, then in the app's Connect screen enter the **app's own URL** (the domain you serve the app on), not the Portainer URL. The container's nginx proxies `/api/*` to Portainer server-side, so there's no CORS at all:
+**Option 1 — same-origin proxy (recommended).** The container's nginx forwards `/api/*` to Portainer server-side, so there's no CORS at all. Set `PORTAINER_URL` and expose the app via Traefik labels (see `compose.yaml`):
 
 ```yaml
 services:
@@ -51,34 +51,30 @@ services:
     build: .
     environment:
       PORTAINER_URL: "https://portainer.example.com"
-    # ... labels/network to expose it via Traefik
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.portainer-mobile.rule=Host(`pm.example.com`)
+      - traefik.http.routers.portainer-mobile.entrypoints=websecure
+      - traefik.http.routers.portainer-mobile.tls.certresolver=letsencrypt
+      - traefik.http.services.portainer-mobile.loadbalancer.server.port=80
+    networks:
+      - traefik   # external network attached to your Traefik instance
 ```
 
-**Option 2 — CORS middleware on the Portainer router** (Traefik file provider). Keep entering `https://portainer.example.com` in the app:
+Then in the app's Connect screen, enter **the app's own URL** (`https://pm.example.com`), not the Portainer URL, plus your API key.
+
+**Option 2 — CORS middleware via labels on the Portainer container.** Keep entering `https://portainer.example.com` in the app:
 
 ```yaml
-http:
-  middlewares:
-    cors-for-mobile:
-      headers:
-        accessControlAllowOriginList:
-          - "https://pm.example.com"          # the app's origin
-        accessControlAllowMethods:
-          - GET
-          - POST
-          - PUT
-          - DELETE
-          - OPTIONS
-        accessControlAllowHeaders:
-          - Content-Type
-          - X-API-Key
-          - Authorization
-        accessControlMaxAge: 600
-  routers:
-    portainer:
-      rule: Host(`portainer.example.com`)
-      service: portainer
-      middlewares: [cors-for-mobile]
+labels:
+  - traefik.http.routers.portainer.rule=Host(`portainer.example.com`)
+  - traefik.http.routers.portainer.entrypoints=websecure
+  - traefik.http.routers.portainer.tls.certresolver=letsencrypt
+  - traefik.http.routers.portainer.middlewares=cors-for-mobile@docker
+  - traefik.http.middlewares.cors-for-mobile.headers.accesscontrolalloworiginlist=https://pm.example.com
+  - traefik.http.middlewares.cors-for-mobile.headers.accesscontrolallowmethods=GET,POST,PUT,DELETE,OPTIONS
+  - traefik.http.middlewares.cors-for-mobile.headers.accesscontrolallowheaders=Content-Type,X-API-Key,Authorization
+  - traefik.http.middlewares.cors-for-mobile.headers.accesscontrolmaxage=600
 ```
 
 ## Why it's light on memory
