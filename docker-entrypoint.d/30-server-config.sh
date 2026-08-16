@@ -43,6 +43,10 @@ if [ -n "$PORTAINER_URL" ]; then
         proxy_read_timeout 60s;
     }
 EOF
+
+    # Tell the frontend that /api is proxied so the Connect screen can
+    # auto-fill the app's own URL (same-origin) instead of the Portainer URL.
+    sed -i 's#</head>#<script>window.__PM_PROXY__=1</script></head>#' /usr/share/nginx/html/index.html
 fi
 
 cat >> "$CONF" <<'EOF'

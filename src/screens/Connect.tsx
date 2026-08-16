@@ -10,9 +10,14 @@ export function ConnectScreen() {
   const loading = useApp((s) => s.loading)
   const error = useApp((s) => s.error)
 
-  // Prefill from a previously saved connection so reconnecting is one tap
+  // Prefill from a previously saved connection so reconnecting is one tap.
+  // When the container proxies /api to Portainer (PORTAINER_URL set), the UI
+  // is served same-origin — the URL to connect with is the app's own, not the
+  // Portainer host (a different subdomain is still a different origin).
   const saved = getConfig()
-  const [url, setUrl] = useState(saved.url || 'https://portainer.example.com')
+  const proxied =
+    typeof window !== 'undefined' && (window as unknown as { __PM_PROXY__?: number }).__PM_PROXY__ === 1
+  const [url, setUrl] = useState(saved.url || (proxied ? window.location.origin : 'https://portainer.example.com'))
   const [token, setToken] = useState(saved.token || '')
   const [isJwt, setIsJwt] = useState(saved.isJwt)
 
@@ -77,6 +82,12 @@ export function ConnectScreen() {
           <div className="hint">
             <IconKey size={12} style={{ verticalAlign: -2 }} /> Create an access token in Portainer → My account → Access
             tokens. The app appends <code>/api</code> to the URL automatically.
+            {proxied && (
+              <div style={{ marginTop: 6, color: 'var(--accent-2)' }}>
+                This app proxies <code>/api</code> to your Portainer — keep the app's own URL (prefilled above), not the
+                Portainer host.
+              </div>
+            )}
           </div>
         </div>
 

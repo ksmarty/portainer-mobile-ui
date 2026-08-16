@@ -99,11 +99,9 @@ docker run -d --name portainer-mobile -p 8080:80 \
 
 ### Behind Traefik (Docker provider / labels)
 
-If the app and Portainer live on **different origins** (different domains), the browser blocks the direct cross-origin calls unless Portainer allows CORS. Two options:
+If the app and Portainer live on **different origins**, the browser blocks the direct cross-origin calls unless Portainer allows CORS. Note: **different subdomains are still different origins** — `pm.notato.xyz` vs `portainer.notato.xyz` is still CORS. Two options:
 
-**Option 1 — same-origin proxy (recommended).** The container's nginx forwards `/api/*` to Portainer server-side, so there's no CORS at all. Set `PORTAINER_URL` and expose the app via Traefik labels (see `compose.yaml`):
-
-```yaml
+**Option 1 — same-origin proxy (recommended).** The container's nginx forwards `/api/*` to Portainer server-side, so there's no CORS at all. Set `PORTAINER_URL` and expose the app via Traefik labels (see `compose.yaml`):```yaml
 services:
   portainer-mobile:
     build: .
@@ -119,7 +117,7 @@ services:
       - traefik   # external network attached to your Traefik instance
 ```
 
-Then in the app's Connect screen, enter **the app's own URL** (`https://pm.example.com`), not the Portainer URL, plus your API key.
+Then in the app's Connect screen, enter **the app's own URL** (`https://pm.example.com`), not the Portainer URL, plus your API key. When the container is running with `PORTAINER_URL` set, the Connect screen detects the proxy and **prefills the app's own URL automatically**.
 
 **Option 2 — CORS middleware via labels on the Portainer container.** Keep entering `https://portainer.example.com` in the app:
 
