@@ -225,22 +225,36 @@ export function getDashboard(): Promise<DashboardStats> {
     }
     for (const ep of eps.filter((e) => e.Status === 1)) {
       try {
-        const [containers, images, volumes, networks] = await Promise.all([
+        const [containers, images, volumes, networks, info] = await Promise.all([
           getContainers(ep.Id, true),
           getImages(ep.Id),
           getVolumes(ep.Id),
           getNetworks(ep.Id),
+          // System totals: CPU count and total memory for this endpoint host
+          portainerFetch<{ NCPU?: number; MemTotal?: number }>(dockerPath(ep.Id, '/info')),
         ])
         total.containersRunning += containers.filter((c) => c.State === 'running').length
         total.containersStopped += containers.filter((c) => c.State !== 'running').length
         total.images += images.length
         total.volumes += volumes.length
         total.networks += networks.length
-        total.stacks += 0
+        total.memoryTotal += info.MemTotal || 0
+        // Live CPU + memory usage: one-shot stats per running container.
+        const running = containers.filter((c) => c.State === 'running')
+        if (running.length > 0) {
+          const stats = await Promise.all(running.map((c) => getContainerStats(ep.Id, c.Id)))
+          for (const s of stats) {
+            total.cpu += s.cpuPercent
+            total.memoryUsed += s.memUsage
+          }
+        }
       } catch {
         // skip unreachable endpoint
       }
     }
+    total.cpu = Math.min(100, Math.round(total.cpu))
+    total.memory =
+      total.memoryTotal > 0 ? Math.min(100, Math.round((total.memoryUsed / total.memoryTotal) * 100)) : 0
     return total
   })()
 }

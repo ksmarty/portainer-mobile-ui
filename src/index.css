@@ -28,6 +28,7 @@
   --radius-sm: 9px;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
 }
 
 * {
@@ -93,7 +94,7 @@ a {
 .app-shell {
   max-width: 520px;
   margin: 0 auto;
-  min-height: 100vh;
+  min-height: var(--app-height, 100dvh);
   position: relative;
 }
 
@@ -107,7 +108,7 @@ a {
 .page-editor {
   display: flex;
   flex-direction: column;
-  height: calc(100dvh - 46px);
+  height: calc(var(--app-height, 100dvh) - 46px - var(--safe-top));
   overflow: hidden;
   padding-bottom: calc(64px + var(--safe-bottom));
 }
@@ -133,6 +134,9 @@ a {
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--border-soft);
+  /* In standalone mode the webview extends under the Dynamic Island/notch;
+     pad the bar down so its content clears the status area. */
+  padding-top: var(--safe-top);
 }
 
 .topbar-inner {

@@ -2,9 +2,85 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="theme-color" content="#0b0f14" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0a0d16" />
+    <meta name="description" content="A mobile-first web UI for Portainer." />
     <title>Portainer Mobile</title>
+
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/png" href="/icon-192.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!-- iOS home-screen / standalone mode -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Portainer" />
+
+    <script>
+      // Standalone (installed) PWA height handling for iOS.
+      // iOS reports the full screen size rather than the usable webview, so the
+      // shell can under/overflow around the Dynamic Island and home indicator.
+      // We track the largest plausible visual-viewport height per orientation,
+      // apply it as --app-height, and re-measure as the viewport changes.
+      (function () {
+        var key = 'pm-app-height-v1'
+        function cap() {
+          return Math.round(screen.height * window.devicePixelRatio) || window.innerHeight
+        }
+        function portrait() {
+          return window.matchMedia('(orientation: portrait)').matches
+        }
+        var cur = portrait() ? 'p' : 'l'
+        function readStored() {
+          try {
+            var o = JSON.parse(localStorage.getItem(key) || '{}')
+            return o[cur] || 0
+          } catch (e) {
+            return 0
+          }
+        }
+        function store() {
+          try {
+            var o = JSON.parse(localStorage.getItem(key) || '{}')
+            o[cur] = best
+            localStorage.setItem(key, JSON.stringify(o))
+          } catch (e) {}
+        }
+        function set() {
+          var c = cap()
+          var hh = window.innerHeight || c
+          var vv = window.visualViewport ? window.visualViewport.height : hh
+          if (standalone) {
+            hh = Math.min(hh, c)
+            vv = Math.min(vv, c)
+            best = Math.max(hh, vv)
+            if (best <= (readStored() || 0)) {
+              document.documentElement.style.setProperty('--app-height', best + 'px')
+              return
+            }
+            store()
+          } else {
+            best = hh
+          }
+          document.documentElement.style.setProperty('--app-height', best + 'px')
+        }
+        window.addEventListener('orientationchange', function () {
+          cur = portrait() ? 'p' : 'l'
+          set()
+        })
+        window.addEventListener('resize', set)
+        if (window.visualViewport) window.visualViewport.addEventListener('resize', set)
+        window.addEventListener('pointerdown', set)
+        document.addEventListener('visibilitychange', function () {
+          if (!document.hidden) set()
+        })
+        set()
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
