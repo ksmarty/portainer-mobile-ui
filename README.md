@@ -39,6 +39,48 @@ docker run -d --name portainer-mobile -p 8080:80 \
   portainer-mobile
 ```
 
+### Behind Traefik (or any reverse proxy)
+
+If the app and Portainer live on **different origins** (different domains), the browser blocks the direct cross-origin calls unless Portainer allows CORS. Two options:
+
+**Option 1 — same-origin proxy (recommended):** set `PORTAINER_URL` in `compose.yaml`, then in the app's Connect screen enter the **app's own URL** (the domain you serve the app on), not the Portainer URL. The container's nginx proxies `/api/*` to Portainer server-side, so there's no CORS at all:
+
+```yaml
+services:
+  portainer-mobile:
+    build: .
+    environment:
+      PORTAINER_URL: "https://portainer.example.com"
+    # ... labels/network to expose it via Traefik
+```
+
+**Option 2 — CORS middleware on the Portainer router** (Traefik file provider). Keep entering `https://portainer.example.com` in the app:
+
+```yaml
+http:
+  middlewares:
+    cors-for-mobile:
+      headers:
+        accessControlAllowOriginList:
+          - "https://pm.example.com"          # the app's origin
+        accessControlAllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        accessControlAllowHeaders:
+          - Content-Type
+          - X-API-Key
+          - Authorization
+        accessControlMaxAge: 600
+  routers:
+    portainer:
+      rule: Host(`portainer.example.com`)
+      service: portainer
+      middlewares: [cors-for-mobile]
+```
+
 ## Why it's light on memory
 
 - **Multi-stage build** — the final image has no Node.js runtime and no npm packages, only static files.
