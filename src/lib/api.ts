@@ -140,8 +140,17 @@ async function portainerFetch<T>(path: string, options: RequestInit = {}, params
   }
   let res: Response
   try {
-    res = await fetch(base + path + qs, { ...options, headers })
+    res = await fetch(base + path + qs, {
+      ...options,
+      headers,
+      // Never let a single request hang the UI forever (e.g. an unreachable
+      // endpoint during dashboard aggregation).
+      signal: options.signal ?? AbortSignal.timeout(30000),
+    })
   } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      throw new ApiError(`Timed out contacting ${cfg.url}.`, 0)
+    }
     throw new ApiError(
       `Cannot reach ${cfg.url}. Check the URL and your network. If this app is hosted on a different origin, Portainer must allow CORS — or run it behind the container's /api proxy (PORTAINER_URL).`,
       0,

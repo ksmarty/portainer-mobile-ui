@@ -47,6 +47,8 @@ body {
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
+  /* Mobile UX: never allow the whole page to scroll sideways. */
+  overflow-x: hidden;
 }
 
 #root {
@@ -98,6 +100,16 @@ a {
 .page {
   padding: 0 10px calc(64px + var(--safe-bottom));
   animation: fade 0.18s ease;
+}
+
+/* Stack editor: pin the page to the viewport so the code editor fills the
+   remaining space instead of scrolling the whole page. */
+.page-editor {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - 46px);
+  overflow: hidden;
+  padding-bottom: calc(64px + var(--safe-bottom));
 }
 
 @keyframes fade {
@@ -595,7 +607,7 @@ a {
 
 .stat-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 

@@ -40,7 +40,7 @@ export function HomeScreen() {
   return (
     <div className="page">
       <div className="hero" style={{ marginTop: 8 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 8 }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '2px 0' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <IconCpu size={15} style={{ color: 'var(--accent-2)' }} />

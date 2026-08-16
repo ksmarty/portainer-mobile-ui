@@ -136,7 +136,7 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
   }
 
   return (
-    <div className="page">
+    <div className={mode === 'compose' ? 'page page-editor' : 'page'}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
         <div style={{ flex: 1 }}>
           <input
@@ -164,7 +164,7 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
       </div>
 
       {mode === 'compose' && (
-        <div style={{ marginTop: 8 }}>
+        <div style={{ marginTop: 8, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center', overflowX: 'auto' }}>
             <button className="btn sm ghost" onClick={applyFormat}>Format</button>
             <button className="btn sm ghost" onClick={applySchema}>Apply schema</button>
@@ -174,14 +174,17 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
             </button>
           </div>
 
-          <CodeEditor
-            ref={editorRef}
-            value={compose}
-            onChange={setCompose}
-            minHeight={280}
-            placeholder={'services:\n  app:\n    image: nginx:alpine'}
-            extraEnv={envRows.map((r) => r.key.trim()).filter(Boolean)}
-          />
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', marginTop: 6 }}>
+            <CodeEditor
+              ref={editorRef}
+              value={compose}
+              onChange={setCompose}
+              minHeight={160}
+              grow
+              placeholder={'services:\n  app:\n    image: nginx:alpine'}
+              extraEnv={envRows.map((r) => r.key.trim()).filter(Boolean)}
+            />
+          </div>
 
           {notes.error && (
             <div className="card" style={{ marginTop: 6, borderColor: 'var(--red)', background: 'var(--red-soft)' }}>

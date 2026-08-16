@@ -84,9 +84,10 @@ export const CodeEditor = forwardRef<CodeEditorHandle, {
   value: string
   onChange: (v: string) => void
   minHeight?: number
+  grow?: boolean
   placeholder?: string
   extraEnv?: string[]
-}>(function CodeEditor({ value, onChange, minHeight = 300, placeholder, extraEnv = [] }, ref) {
+}>(function CodeEditor({ value, onChange, minHeight = 300, grow = false, placeholder, extraEnv = [] }, ref) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const preRef = useRef<HTMLPreElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
@@ -226,7 +227,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, {
   }
 
   return (
-    <div className="code-editor" style={{ minHeight }} ref={wrapRef}>
+    <div className="code-editor" style={{ minHeight, ...(grow ? { flex: 1 } : {}) }} ref={wrapRef}>
       <pre ref={preRef} className="code-editor-pre" aria-hidden="true" dangerouslySetInnerHTML={{ __html: html }} />
       <textarea
         ref={taRef}

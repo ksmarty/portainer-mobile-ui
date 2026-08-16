@@ -201,17 +201,19 @@ export const useApp = create<AppState>((set, get) => ({
         if (cfg.url && cfg.token) {
           const endpoints = await getEndpoints()
           const active = endpoints[0]?.Id || 1
-          const [containers, images, volumes, networks, stacks, settings, users, teams, registries] = await Promise.all([
-            getContainers(active),
-            getImages(active),
-            getVolumes(active),
-            getNetworks(active),
-            getStacks(),
-            getSettings(),
-            getUsers(),
-            getTeams(),
-            getRegistries(),
-          ])
+          const [containers, images, volumes, networks, stacks, settings, users, teams, registries, dashboard] =
+            await Promise.all([
+              getContainers(active),
+              getImages(active),
+              getVolumes(active),
+              getNetworks(active),
+              getStacks(),
+              getSettings(),
+              getUsers(),
+              getTeams(),
+              getRegistries(),
+              getDashboard(),
+            ])
           set({
             demo: false,
             user: { Id: 0, Username: 'connected', Role: 1 },
@@ -226,6 +228,7 @@ export const useApp = create<AppState>((set, get) => ({
             users,
             teams,
             registries,
+            dashboard,
             ready: true,
             booting: false,
           })
@@ -263,13 +266,14 @@ export const useApp = create<AppState>((set, get) => ({
       await testConnection()
       const endpoints = await getEndpoints()
       const active = endpoints[0]?.Id || 1
-      const [containers, images, volumes, networks, stacks, settings] = await Promise.all([
+      const [containers, images, volumes, networks, stacks, settings, dashboard] = await Promise.all([
         getContainers(active),
         getImages(active),
         getVolumes(active),
         getNetworks(active),
         getStacks(),
         getSettings(),
+        getDashboard(),
       ])
       set({
         demo: false,
@@ -281,6 +285,7 @@ export const useApp = create<AppState>((set, get) => ({
         networks,
         stacks,
         settings,
+        dashboard,
         loading: false,
         ready: true,
       })
