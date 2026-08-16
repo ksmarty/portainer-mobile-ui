@@ -4,13 +4,54 @@ A mobile-first web UI for [Portainer](https://www.portainer.io/), built with Rea
 
 ## Run the published image (GHCR)
 
-The built image is published to **`ghcr.io/ksmarty/portainer-mobile-ui`** by the Release workflow (Actions → Release → Run workflow), tagged with a semver version and `latest`. The repo ships `compose.ghcr.yaml` which deploys it without building anything locally:
+The built image is published to **`ghcr.io/ksmarty/portainer-mobile-ui`** by the Release workflow (Actions → Release → Run workflow), tagged with a semver version and `latest`. The repo ships `compose.ghcr.yaml` — or copy the compose file straight from here:
 
-```bash
-docker compose -f compose.ghcr.yaml up -d
+```yaml
+services:
+  portainer-mobile:
+    image: ghcr.io/ksmarty/portainer-mobile-ui:latest
+    container_name: portainer-mobile
+    # Direct access on :8080 (optional). Remove if Traefik is the only ingress.
+    ports:
+      - "8080:80"
+    environment:
+      # Same-origin proxy: forwards /api/* to Portainer server-side (no CORS).
+      # Then in the app, connect with THIS app's own URL, not the Portainer URL.
+      PORTAINER_URL: "https://portainer.example.com"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.portainer-mobile.rule=Host(`pm.example.com`)
+      - traefik.http.routers.portainer-mobile.entrypoints=websecure
+      - traefik.http.routers.portainer-mobile.tls.certresolver=letsencrypt
+      - traefik.http.services.portainer-mobile.loadbalancer.server.port=80
+    networks:
+      - traefik
+    restart: unless-stopped
+
+networks:
+  traefik:
+    external: true
 ```
 
-The compose file includes the same options as the local build: `PORTAINER_URL` for the same-origin `/api` proxy and Traefik labels (adjust the host rule, cert resolver, and external network to match yours).
+Start it with:
+
+```bash
+docker compose -f compose.ghcr.yaml up -d        # using the repo's file
+# or, if you pasted the YAML above into your own compose file:
+docker compose up -d
+```
+
+**Options:**
+
+| Environment variable | Default | Description |
+| --- | --- | --- |
+| `PORTAINER_URL` | *(unset)* | When set, `/api/*` is proxied to this Portainer instance (avoids CORS). Leave unset to enter the Portainer URL directly in the app. |
+
+**First-time notes:**
+
+- The image must exist on GHCR — trigger the Release workflow once (see [CI & releases](#ci--releases-github-actions)). Until then use the [local build](#run-with-docker-compose-local-build).
+- GHCR packages are private by default: set the package visibility to **public** (GitHub → your profile → Packages) if you want to pull without a token.
+- If Portainer is not publicly resolvable from the container, use its internal hostname in `PORTAINER_URL` (e.g. `http://portainer:9000`).
 
 Or run it directly:
 
