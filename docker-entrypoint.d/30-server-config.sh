@@ -33,10 +33,14 @@ EOF
 
 if [ -n "$PORTAINER_URL" ]; then
     cat >> "$CONF" <<EOF
-    # Optional reverse proxy: forwards /api/* to the configured Portainer
+    # Optional reverse proxy: forwards /api/* to the configured Portainer.
+    # Host is forwarded as the upstream host so routing at the other end
+    # lands on Portainer — forwarding the app's own Host header would loop
+    # the request straight back into this container.
     location /api/ {
         proxy_pass ${PORTAINER_URL%/};
-        proxy_set_header Host \$host;
+        proxy_set_header Host \$proxy_host;
+        proxy_ssl_server_name on;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
@@ -46,7 +50,9 @@ EOF
 
     # Tell the frontend that /api is proxied so the Connect screen can
     # auto-fill the app's own URL (same-origin) instead of the Portainer URL.
-    sed -i 's#</head>#<script>window.__PM_PROXY__=1</script></head>#' /usr/share/nginx/html/index.html
+    if [ -f /usr/share/nginx/html/index.html ]; then
+        sed -i 's#</head>#<script>window.__PM_PROXY__=1</script></head>#' /usr/share/nginx/html/index.html
+    fi
 fi
 
 cat >> "$CONF" <<'EOF'
