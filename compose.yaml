@@ -1,0 +1,13 @@
+services:
+  portainer-mobile:
+    build: .
+    image: portainer-mobile:latest
+    container_name: portainer-mobile
+    ports:
+      - "8080:80"
+    environment:
+      # Optional: reverse-proxy /api/* to a Portainer instance so the UI can
+      # talk to it same-origin (avoids CORS). If unset, the container just
+      # serves the UI and you enter the Portainer URL + API key in the app.
+      # PORTAINER_URL: "https://portainer.example.com"
+    restart: unless-stopped
