@@ -2,7 +2,24 @@
 
 A mobile-first web UI for [Portainer](https://www.portainer.io/), built with React + Vite + Tailwind. Connect to any Portainer instance with an API key or JWT, or explore the built-in demo mode.
 
-## Run with Docker Compose
+## Run the published image (GHCR)
+
+The built image is published to **`ghcr.io/ksmarty/portainer-mobile-ui`** by the Release workflow (Actions → Release → Run workflow), tagged with a semver version and `latest`. The repo ships `compose.ghcr.yaml` which deploys it without building anything locally:
+
+```bash
+docker compose -f compose.ghcr.yaml up -d
+```
+
+The compose file includes the same options as the local build: `PORTAINER_URL` for the same-origin `/api` proxy and Traefik labels (adjust the host rule, cert resolver, and external network to match yours).
+
+Or run it directly:
+
+```bash
+docker pull ghcr.io/ksmarty/portainer-mobile-ui:latest
+docker run -d --name portainer-mobile -p 8080:80 ghcr.io/ksmarty/portainer-mobile-ui
+```
+
+## Run with Docker Compose (local build)
 
 The project ships a `Dockerfile` (multi-stage: Node builds the bundle, **nginx:alpine** serves it) and a `compose.yaml`.
 
@@ -98,12 +115,7 @@ The release tag and commit SHA are passed as `VERSION`/`COMMIT` build-args and b
 
 **Manual release:** Actions → **Release** → *Run workflow* → pick `patch` / `minor` / `major`.
 
-**Pull the published image:**
-
-```bash
-docker pull ghcr.io/ksmarty/portainer-mobile-ui:latest
-docker run -d --name portainer-mobile -p 8080:80 ghcr.io/ksmarty/portainer-mobile-ui
-```
+To deploy the published image, see [Run the published image (GHCR)](#run-the-published-image-ghcr).
 
 ## Development
 
