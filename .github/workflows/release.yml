@@ -43,14 +43,23 @@ jobs:
           BUMP: ${{ inputs.bump || 'auto' }}
         run: |
           set -euo pipefail
-          LAST=$(git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0)
-          BASE=${LAST#v}
-          IFS=. read -r CUR_MAJOR CUR_MINOR CUR_PATCH <<< "$BASE"
-          CUR_MAJOR=${CUR_MAJOR:-0}; CUR_MINOR=${CUR_MINOR:-0}; CUR_PATCH=${CUR_PATCH:-0}
-
-          COMMITS=$(git log "$LAST..HEAD" --format=%s%n%b 2>/dev/null || true)
+          # With no tags yet, git describe fails. In that case count commits
+          # from the start of history with a v0.0.0 base, instead of computing
+          # a bogus range against a non-existent tag.
+          LAST=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -z "$LAST" ]; then
+            echo "No tags yet — counting commits from the start of history."
+            BASE="0.0.0"
+            CUR_MAJOR=0; CUR_MINOR=0; CUR_PATCH=0
+            COMMITS=$(git log HEAD --format=%s%n%b 2>/dev/null || true)
+          else
+            BASE=${LAST#v}
+            IFS=. read -r CUR_MAJOR CUR_MINOR CUR_PATCH <<< "$BASE"
+            CUR_MAJOR=${CUR_MAJOR:-0}; CUR_MINOR=${CUR_MINOR:-0}; CUR_PATCH=${CUR_PATCH:-0}
+            COMMITS=$(git log "$LAST..HEAD" --format=%s%n%b 2>/dev/null || true)
+          fi
           if [ -z "$(printf '%s' "$COMMITS" | tr -d '[:space:]')" ]; then
-            echo "No commits since $LAST — nothing to release."
+            echo "No commits since ${LAST:-the start} — nothing to release."
             echo "tag=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
