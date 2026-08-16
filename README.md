@@ -88,10 +88,10 @@ labels:
 
 Workflows live in `.github/workflows/`, following the pattern used by [ksmarty/v1](https://github.com/ksmarty/v1):
 
-- **`ci.yml`** — runs on every pull request to `main`: builds the frontend and verifies the Docker image builds (`linux/amd64`). The build output is cached with `type=gha` so repeat runs are fast.
-- **`release.yml`** — runs on pushes to `main` (and manually). It:
+- **`ci.yml`** — runs on every pull request to `master`: builds the frontend and verifies the Docker image builds (`linux/amd64`). The build output is cached with `type=gha` so repeat runs are fast.
+- **`release.yml`** — runs on pushes to `master` (and manually). It:
   1. Computes the next semver tag from conventional commits since the last tag (`feat:` → minor, `feat!:`/`BREAKING CHANGE` → major, anything else → patch). Manual runs use the bump you pick instead. No commits → no release.
-  2. Builds a multi-arch image (`linux/amd64` + `linux/arm64`) and pushes it to **`ghcr.io/<owner>/portainer-mobile`**, tagged with the new version and `latest`.
+  2. Builds a multi-arch image (`linux/amd64` + `linux/arm64`) and pushes it to **`ghcr.io/ksmarty/portainer-mobile-ui`**, tagged with the new version and `latest`.
   3. Creates a GitHub Release with auto-generated notes.
 
 The release tag and commit SHA are passed as `VERSION`/`COMMIT` build-args and baked into the image at `/version.json`.
@@ -101,8 +101,8 @@ The release tag and commit SHA are passed as `VERSION`/`COMMIT` build-args and b
 **Pull the published image:**
 
 ```bash
-docker pull ghcr.io/<owner>/portainer-mobile:latest
-docker run -d --name portainer-mobile -p 8080:80 ghcr.io/<owner>/portainer-mobile
+docker pull ghcr.io/ksmarty/portainer-mobile-ui:latest
+docker run -d --name portainer-mobile -p 8080:80 ghcr.io/ksmarty/portainer-mobile-ui
 ```
 
 ## Development
