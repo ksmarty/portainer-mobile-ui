@@ -22,7 +22,6 @@ import {
   getVolumes,
   isDemo,
   pullImage,
-  recreateContainer,
   removeContainer,
   removeImage,
   removeNetwork,
@@ -419,11 +418,24 @@ export const useApp = create<AppState>((set, get) => ({
   doFetchNewImage: async (id) => {
     const ep = endpointId(get())
     const c = get().containers.find((x) => x.Id === id)
-    const name = (c?.Names?.[0] || 'container').replace(/^\//, '')
+    if (!c) return
+    const ref = c.Image || ''
+    // Split repo/tag; digest references are pulled as-is with an empty tag.
+    let from = ref
+    let tag = 'latest'
+    if (ref.includes('@')) {
+      tag = ''
+    } else {
+      const slash = ref.lastIndexOf('/')
+      const colon = ref.lastIndexOf(':')
+      if (colon > slash) {
+        from = ref.slice(0, colon)
+        tag = ref.slice(colon + 1)
+      }
+    }
     try {
-      await recreateContainer(ep, id, name)
-      get().toast('Image fetched — container recreated', 'success')
-      get().back()
+      await pullImage(ep, from, tag)
+      get().toast(`Pulled ${ref}`, 'success')
       await get().refresh()
     } catch (e) {
       get().toast((e as Error).message, 'error')

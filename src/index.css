@@ -829,9 +829,7 @@ a {
   font-family: inherit;
   font-size: inherit;
   line-height: inherit;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-wrap: break-word;
+  white-space: pre;
   tab-size: 2;
   text-align: left;
 }
@@ -843,6 +841,7 @@ a {
   pointer-events: none;
   color: #c9d4f5;
   background: transparent;
+  white-space: pre;
 }
 
 .code-editor-textarea {

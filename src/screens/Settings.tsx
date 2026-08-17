@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useApp } from '../store'
 import {
   IconKey,
@@ -111,8 +112,33 @@ export function SettingsScreen() {
       )}
 
       <div style={{ textAlign: 'center', color: 'var(--text-faint)', fontSize: 11.5, marginTop: 14 }}>
-        Portainer Mobile · v1.0
+        Portainer Mobile · <BuildVersion />
       </div>
     </div>
   )
+}
+
+// Shows the build version baked into the container at /version.json
+// (VERSION/COMMIT build-args), falling back to "dev build" in dev/preview.
+function BuildVersion() {
+  const [v, setV] = useState('…')
+  useEffect(() => {
+    let alive = true
+    fetch('/version.json')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { version?: string; commit?: string } | null) => {
+        if (!alive) return
+        if (d?.version && d.version !== 'dev') {
+          const short = d.commit ? d.commit.slice(0, 7) : ''
+          setV(`v${d.version}${short ? ` · ${short}` : ''}`)
+        } else {
+          setV('dev build')
+        }
+      })
+      .catch(() => alive && setV('dev build'))
+    return () => {
+      alive = false
+    }
+  }, [])
+  return <>{v}</>
 }

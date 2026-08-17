@@ -50,7 +50,7 @@ export function ContainerDetailScreen({ id }: { id: string }) {
       : { label: 'Restart', icon: <IconRestart size={19} />, cls: '', action: () => doContainerAction(id, 'restart') },
     { label: 'Logs', icon: <IconTerminal size={19} />, cls: '', action: () => navigate({ name: 'container-logs', title: `${name} logs`, props: { id } }) },
     { label: 'Stats', icon: <IconActivity size={19} />, cls: '', action: () => navigate({ name: 'container-stats', title: `${name} stats`, props: { id } }) },
-    { label: 'New image', icon: <IconDownload size={19} />, cls: '', action: () => setConfirmFetch(true) },
+    { label: 'Pull image', icon: <IconDownload size={19} />, cls: '', action: () => setConfirmFetch(true) },
     { label: 'Image', icon: <IconInfo size={19} />, cls: '', action: () => setShowImageInfo(true) },
   ]
 
@@ -165,7 +165,10 @@ export function ContainerDetailScreen({ id }: { id: string }) {
           onCancel={() => setConfirmFetch(false)}
           onConfirm={() => {
             setFetchBusy(true)
-            void doFetchNewImage(id).finally(() => setFetchBusy(false))
+            void doFetchNewImage(id).finally(() => {
+              setFetchBusy(false)
+              setConfirmFetch(false)
+            })
           }}
         />
       )}
@@ -212,17 +215,17 @@ function FetchNewImageConfirm({
   return (
     <div className="overlay overlay-center">
       <div className="modal">
-        <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>Fetch newer image?</div>
+        <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>Pull newer image?</div>
         <p style={{ color: 'var(--text-dim)', fontSize: 14, margin: '0 0 18px' }}>
-          Pulls the newest version of <span className="mono">{name}</span> and recreates this container with it. The
-          container will be restarted.
+          Pulls the newest version of <span className="mono">{name}</span> to the host. The running container is left
+          untouched — it will keep the old image until you recreate it.
         </p>
         <div className="btn-row">
           <button className="btn ghost" disabled={busy} onClick={onCancel}>
             Cancel
           </button>
           <button className="btn primary" disabled={busy} onClick={onConfirm}>
-            {busy ? <Spinner size={15} /> : 'Fetch & recreate'}
+            {busy ? <Spinner size={15} /> : 'Pull image'}
           </button>
         </div>
       </div>
