@@ -47,6 +47,21 @@ export interface Image {
   Os?: string
 }
 
+export interface ImageInfo {
+  Id: string
+  RepoTags: string[]
+  RepoDigests: string[]
+  Created: number
+  Size: number
+  Architecture?: string
+  Os?: string
+  DockerVersion?: string
+  Author?: string
+  Labels?: Record<string, string>
+  Env?: string[]
+  ExposedPorts?: string[]
+}
+
 export interface Network {
   Id: string
   Name: string

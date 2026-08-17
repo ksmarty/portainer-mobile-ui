@@ -3,6 +3,7 @@ import type {
   DashboardStats,
   Endpoint,
   Image,
+  ImageInfo,
   LogLine,
   Network,
   Registry,
@@ -601,8 +602,34 @@ export function demoPruneImages(): { deleted: number; reclaimed: number } {
   return { deleted: dangling.length, reclaimed }
 }
 
-export function demoPullImage(name: string) {
-  demoState.images.unshift({
+export function demoRecreateContainer(id: string) {
+  const c = demoState.containers.find((x) => x.Id === id)
+  if (!c) return
+  c.Image = (c.Image || 'demo/image').split(':')[0] + ':latest'
+  c.ImageID = 'sha256:' + 'b'.repeat(64)
+  c.Status = 'Up About a minute'
+}
+
+export function demoGetImageInfo(imageId: string): ImageInfo {
+  const img = demoState.images.find((i) => i.Id === imageId)
+  const tag = img?.RepoTags?.[0] || 'demo/image:latest'
+  return {
+    Id: imageId,
+    RepoTags: img?.RepoTags || [tag],
+    RepoDigests: [`${tag.split(':')[0]}@sha256:${'a'.repeat(64)}`],
+    Created: img?.Created || Date.now(),
+    Size: img?.Size || 12884901888,
+    Architecture: img?.Architecture || 'amd64',
+    Os: img?.Os || 'linux',
+    DockerVersion: '26.1.3',
+    Author: '',
+    Labels: { 'org.opencontainers.image.created': new Date().toISOString() },
+    Env: ['PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'],
+    ExposedPorts: ['80/tcp'],
+  }
+}
+
+export function demoPullImage(name: string) {  demoState.images.unshift({
     Id: uid('img'),
     RepoTags: [name],
     Created: now,

@@ -5,22 +5,25 @@ import {
   demoDanglingImages,
   demoDeployStack,
   demoGet,
+  demoGetImageInfo,
   demoPruneImages,
-  demoState,
-  demoLogs,
   demoPullImage,
+  demoRecreateContainer,
   demoRemoveContainer,
   demoRemoveImage,
   demoRemoveNetwork,
   demoRemoveStack,
   demoRemoveVolume,
+  demoState,
   demoStats,
+  demoLogs,
 } from './demo'
 import type {
   Container,
   DashboardStats,
   Endpoint,
   Image,
+  ImageInfo,
   LogLine,
   Network,
   Registry,
@@ -406,6 +409,39 @@ export function pullImage(endpointId: number, fromImage: string, tag = 'latest')
     return demoDelay(undefined, 700)
   }
   return portainerFetch<void>('/endpoints/' + endpointId + '/docker/images/create', { method: 'POST' }, { fromImage, tag })
+}
+
+// Recreates a container from its image, pulling the newest version of the
+// image first (Portainer's "Recreate with new image").
+export async function recreateContainer(endpointId: number, id: string, name: string): Promise<void> {
+  if (isDemo()) {
+    demoRecreateContainer(id)
+    return demoDelay(undefined, 900)
+  }
+  await portainerFetch<void>(
+    dockerPath(endpointId, `/containers/${id}/recreate`),
+    { method: 'POST' },
+    { pullImage: true, name },
+  )
+}
+
+// Detailed metadata for one image (docker inspect).
+export function getImageInfo(endpointId: number, imageId: string): Promise<ImageInfo> {
+  if (isDemo()) return demoDelay(demoGetImageInfo(imageId), 250)
+  return portainerFetch<any>(dockerPath(endpointId, `/images/${imageId}/json`)).then((raw) => ({
+    Id: raw.Id || '',
+    RepoTags: raw.RepoTags || [],
+    RepoDigests: raw.RepoDigests || [],
+    Created: raw.Created ? new Date(raw.Created).getTime() : 0,
+    Size: raw.Size || 0,
+    Architecture: raw.Architecture,
+    Os: raw.Os,
+    DockerVersion: raw.DockerVersion,
+    Author: raw.Author,
+    Labels: raw.Config?.Labels,
+    Env: raw.Config?.Env,
+    ExposedPorts: raw.Config?.ExposedPorts ? Object.keys(raw.Config.ExposedPorts) : [],
+  }))
 }
 
 /* -------------------------------- volumes -------------------------------- */

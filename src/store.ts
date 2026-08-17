@@ -22,6 +22,7 @@ import {
   getVolumes,
   isDemo,
   pullImage,
+  recreateContainer,
   removeContainer,
   removeImage,
   removeNetwork,
@@ -103,6 +104,7 @@ interface AppState {
 
   doContainerAction: (id: string, action: string) => Promise<void>
   doRemoveContainer: (id: string) => Promise<void>
+  doFetchNewImage: (id: string) => Promise<void>
   doCreateContainer: (name: string, image: string) => Promise<void>
   doPullImage: (image: string) => Promise<void>
   doRemoveImage: (id: string) => Promise<void>
@@ -407,6 +409,20 @@ export const useApp = create<AppState>((set, get) => ({
     try {
       await removeContainer(ep, id, true)
       get().toast('Container removed', 'success')
+      get().back()
+      await get().refresh()
+    } catch (e) {
+      get().toast((e as Error).message, 'error')
+    }
+  },
+
+  doFetchNewImage: async (id) => {
+    const ep = endpointId(get())
+    const c = get().containers.find((x) => x.Id === id)
+    const name = (c?.Names?.[0] || 'container').replace(/^\//, '')
+    try {
+      await recreateContainer(ep, id, name)
+      get().toast('Image fetched — container recreated', 'success')
       get().back()
       await get().refresh()
     } catch (e) {
