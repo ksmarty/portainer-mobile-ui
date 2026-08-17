@@ -40,11 +40,11 @@ export function shortId(id: string, len = 12): string {  const clean = id.replac
 export function parseImageRef(ref: string): { from: string; tag: string } {
   const r = ref.trim()
   if (!r) return { from: r, tag: 'latest' }
-  if (r.includes('@')) return { from: r, tag: '' }
+  if (r.includes('@')) return { from: r.toLowerCase(), tag: '' }
   const slash = r.lastIndexOf('/')
   const colon = r.lastIndexOf(':')
-  if (colon > slash) return { from: r.slice(0, colon), tag: r.slice(colon + 1) }
-  return { from: r, tag: 'latest' }
+  if (colon > slash) return { from: r.slice(0, colon).toLowerCase(), tag: r.slice(colon + 1) }
+  return { from: r.toLowerCase(), tag: 'latest' }
 }
 
 export function formatDate(unixSeconds: number): string {

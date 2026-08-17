@@ -134,9 +134,12 @@ async function portainerFetch<T>(path: string, options: RequestInit = {}, params
   const base = apiBase(cfg.url)
   const qs = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : ''
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
   }
+  // Only claim JSON when there's actually a body. POSTs like image pulls send
+  // no body, and some middlewares reject an empty body with a JSON
+  // content-type.
+  if (options.body) headers['Content-Type'] = 'application/json'
   if (cfg.isJwt) {
     headers.Authorization = `Bearer ${cfg.token}`
   } else {
@@ -452,7 +455,11 @@ export function pullImage(endpointId: number, fromImage: string, tag = 'latest')
     demoPullImage(tag === 'latest' ? fromImage : `${fromImage}:${tag}`)
     return demoDelay(undefined, 700)
   }
-  return portainerFetch<void>('/endpoints/' + endpointId + '/docker/images/create', { method: 'POST' }, { fromImage, tag })
+  const params: Record<string, unknown> = { fromImage }
+  // Only include the tag when there is one: an empty tag query param gets
+  // rejected by some Portainer versions.
+  if (tag) params.tag = tag
+  return portainerFetch<void>('/endpoints/' + endpointId + '/docker/images/create', { method: 'POST' }, params)
 }
 
 // Detailed metadata for one network (docker inspect).
