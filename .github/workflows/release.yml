@@ -97,6 +97,7 @@ jobs:
     needs: tag
     if: needs.tag.outputs.tag != ''
     runs-on: ubuntu-latest
+    timeout-minutes: 30 # fail loudly instead of hanging for the 6h default
     permissions:
       contents: write # create the GitHub Release
       packages: write # push to GHCR
@@ -143,8 +144,19 @@ jobs:
           build-args: |
             VERSION=${{ needs.tag.outputs.tag }}
             COMMIT=${{ github.sha }}
+          pull: true
+          # provenance/sbom export has been known to hang the build; not
+          # needed here.
+          provenance: false
+          sbom: false
+          # mode=min only caches final layers: the mode=max export (all
+          # intermediate layers incl. the QEMU npm layer) grows every release
+          # and can stall the GitHub cache backend for minutes/hours.
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=min
+        env:
+          # Stream plain build output so a hang is visible in the logs.
+          BUILDKIT_PROGRESS: plain
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
