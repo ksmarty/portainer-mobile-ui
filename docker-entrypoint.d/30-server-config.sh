@@ -40,6 +40,17 @@ server {
         add_header Cache-Control "no-cache";
         try_files /manifest.json =404;
     }
+
+    # The app shell must always be revalidated so updated builds propagate
+    # (through Cloudflare/caches) on the very next navigation.
+    location = /index.html {
+        add_header Cache-Control "no-cache, must-revalidate";
+        try_files /index.html =404;
+    }
+    location = / {
+        add_header Cache-Control "no-cache, must-revalidate";
+        try_files /index.html =404;
+    }
 EOF
 
 if [ -n "$PORTAINER_URL" ]; then
@@ -63,6 +74,15 @@ EOF
     # auto-fill the app's own URL (same-origin) instead of the Portainer URL.
     if [ -f /usr/share/nginx/html/index.html ]; then
         sed -i 's#</head>#<script>window.__PM_PROXY__=1</script></head>#' /usr/share/nginx/html/index.html
+    fi
+fi
+
+# Bake the build version into the page: the app registers the service worker
+# with a versioned URL (/sw.js?v=<build>), forcing an update every release.
+if [ -f /usr/share/nginx/html/version.json ]; then
+    V=$(grep -o '"version":"[^"]*"' /usr/share/nginx/html/version.json | head -1 | cut -d'"' -f4)
+    if [ -n "$V" ] && [ -f /usr/share/nginx/html/index.html ]; then
+        sed -i "s#</head>#<script>window.__PM_VERSION__='$V'</script></head>#" /usr/share/nginx/html/index.html
     fi
 fi
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useApp } from '../store'
 import {
+  IconDownload,
   IconKey,
   IconLogOut,
   IconRefresh,
@@ -111,11 +112,39 @@ export function SettingsScreen() {
         </button>
       )}
 
+      <SectionTitle>App</SectionTitle>
+      <div className="card-list">
+        <ListItem
+          icon={<IconDownload size={19} />}
+          title="Check for updates"
+          sub="Fetch the latest build and reload"
+          onClick={() => void checkUpdates()}
+        />
+      </div>
+
       <div style={{ textAlign: 'center', color: 'var(--text-faint)', fontSize: 11.5, marginTop: 14 }}>
         Portainer Mobile · <BuildVersion />
       </div>
     </div>
   )
+}
+
+// Manually trigger a service-worker update check and reload. Storage (tokens)
+// is untouched, so no re-authentication is needed.
+async function checkUpdates() {
+  const toast = useApp.getState().toast
+  if (!('serviceWorker' in navigator)) {
+    toast('Service worker is unavailable on this origin', 'error')
+    return
+  }
+  const reg = await navigator.serviceWorker.getRegistration()
+  if (!reg) {
+    toast('This build is not installed as a PWA', 'error')
+    return
+  }
+  await reg.update().catch(() => {})
+  toast('Reloading with the latest version…')
+  setTimeout(() => window.location.reload(), 700)
 }
 
 // Shows the build version baked into the container at /version.json

@@ -42,6 +42,10 @@ COPY --from=build /app/dist /usr/share/nginx/html
 # Expose build metadata (served at /version.json, e.g. by CI/debugging)
 RUN printf '{"version":"%s","commit":"%s"}\n' "$VERSION" "$COMMIT" > /usr/share/nginx/html/version.json
 
+# Version the service-worker cache name per release so a new build can never
+# serve the previous build's cached shell/assets.
+RUN sed -i "s/pm-cache-v1/pm-cache-${VERSION}/g" /usr/share/nginx/html/sw.js
+
 # Lightweight healthcheck (busybox wget ships with alpine)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -q -O /dev/null http://127.0.0.1/ || exit 1
