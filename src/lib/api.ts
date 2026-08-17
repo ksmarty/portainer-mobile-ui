@@ -578,7 +578,9 @@ export function getStackFile(id: number): Promise<string> {
     const s = demoGet<Stack[]>('stacks').find((x) => x.Id === id)
     return demoDelay(s?.File || 'version: "3"\nservices: {}')
   }
-  return portainerFetch<string>(`/stacks/${id}/file`)
+  return portainerFetch<{ StackFileContent?: string }>(`/stacks/${id}/file`).then(
+    (d) => d.StackFileContent || '',
+  )
 }
 
 export function deployStack(name: string, file: string, env: { name: string; value: string }[] = []): Promise<void> {

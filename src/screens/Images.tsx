@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useApp } from '../store'
 import { IconBroom, IconDownload, IconImage, IconPlus, IconSearch, IconTrash } from '../components/Icons'
 import { Empty, ListItem, Skeleton, Spinner } from '../components/ui'
@@ -21,8 +22,12 @@ export function ImageActions() {
       <button className="icon-btn" aria-label="Clean up unused images" onClick={() => setCleanOpen(true)}>
         <IconBroom size={17} />
       </button>
-      {pullOpen && <PullSheet onClose={() => setPullOpen(false)} onPull={(img) => { void doPullImage(img); setPullOpen(false) }} />}
-      {cleanOpen && <CleanupSheet onClose={() => setCleanOpen(false)} />}
+      {pullOpen &&
+        createPortal(
+          <PullSheet onClose={() => setPullOpen(false)} onPull={(img) => { void doPullImage(img); setPullOpen(false) }} />,
+          document.body,
+        )}
+      {cleanOpen && createPortal(<CleanupSheet onClose={() => setCleanOpen(false)} />, document.body)}
     </>
   )
 }
