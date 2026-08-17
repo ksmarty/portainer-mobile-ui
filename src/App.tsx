@@ -9,7 +9,7 @@ import { ContainerDetailScreen } from './screens/ContainerDetail'
 import { ContainerLogsScreen } from './screens/ContainerLogs'
 import { ContainerStatsScreen } from './screens/ContainerStats'
 import { CreateContainerScreen } from './screens/CreateContainer'
-import { ImagesScreen } from './screens/Images'
+import { ImagesScreen, ImageActions } from './screens/Images'
 import { StacksScreen } from './screens/Stacks'
 import { StackDetailScreen } from './screens/StackDetail'
 import { StackEditorScreen } from './screens/StackEditor'
@@ -29,16 +29,49 @@ export default function App() {
   const ready = useApp((s) => s.ready)
   const booting = useApp((s) => s.booting)
   const boot = useApp((s) => s.boot)
+  const back = useApp((s) => s.back)
+  const history = useApp((s) => s.history)
 
   useEffect(() => {
     void boot()
   }, [boot])
 
+  // Swipe right to go back (mobile): system gestures like iOS's edge swipe
+  // close the tab instead, so handle it in-app. Ignored when the touch starts
+  // on an interactive/scrollable element.
+  useEffect(() => {
+    let x0 = 0
+    let y0 = 0
+    let armed = false
+    const onStart = (e: TouchEvent) => {
+      const t = e.touches[0]
+      x0 = t.clientX
+      y0 = t.clientY
+      const el = e.target as HTMLElement
+      armed = !el.closest('button, a, input, textarea, select, [contenteditable], .chip-row, .segmented, .code-block, .editor-suggest')
+    }
+    const onEnd = (e: TouchEvent) => {
+      if (!armed || history.length === 0) return
+      const t = e.changedTouches[0]
+      const dx = t.clientX - x0
+      const dy = t.clientY - y0
+      if (dx > 70 && Math.abs(dx) > Math.abs(dy) * 1.4) back()
+    }
+    window.addEventListener('touchstart', onStart, { passive: true })
+    window.addEventListener('touchend', onEnd, { passive: true })
+    return () => {
+      window.removeEventListener('touchstart', onStart)
+      window.removeEventListener('touchend', onEnd)
+    }
+  }, [back, history.length])
+
   if (!ready || booting) return <LoadingScreen />
 
   return (
     <div className="app-shell">
-      <Router />
+      <div className="app-scroll">
+        <Router />
+      </div>
       <TabBar />
       <Toasts />
     </div>
@@ -103,7 +136,7 @@ function Router() {
     case 'images':
       return (
         <>
-          <TopBar back />
+          <TopBar back right={<ImageActions />} />
           <ImagesScreen />
         </>
       )

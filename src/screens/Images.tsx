@@ -1,20 +1,37 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useApp } from '../store'
-import { IconBroom, IconDownload, IconImage, IconSearch, IconTrash } from '../components/Icons'
+import { IconBroom, IconDownload, IconImage, IconPlus, IconSearch, IconTrash } from '../components/Icons'
 import { Empty, ListItem, Skeleton, Spinner } from '../components/ui'
 import { bytes, shortId, timeAgo } from '../lib/utils'
 import { getDanglingImages } from '../lib/api'
 import type { Image as ImageT } from '../lib/types'
 import { ConfirmModal } from '../components/ConfirmModal'
 
+// Pull-image and cleanup actions, rendered in the top bar so they're always
+// reachable without scrolling to the bottom of the list.
+export function ImageActions() {
+  const doPullImage = useApp((s) => s.doPullImage)
+  const [pullOpen, setPullOpen] = useState(false)
+  const [cleanOpen, setCleanOpen] = useState(false)
+  return (
+    <>
+      <button className="icon-btn" aria-label="Pull image" onClick={() => setPullOpen(true)}>
+        <IconPlus size={19} />
+      </button>
+      <button className="icon-btn" aria-label="Clean up unused images" onClick={() => setCleanOpen(true)}>
+        <IconBroom size={17} />
+      </button>
+      {pullOpen && <PullSheet onClose={() => setPullOpen(false)} onPull={(img) => { void doPullImage(img); setPullOpen(false) }} />}
+      {cleanOpen && <CleanupSheet onClose={() => setCleanOpen(false)} />}
+    </>
+  )
+}
+
 export function ImagesScreen() {
   const images = useApp((s) => s.images)
   const loading = useApp((s) => s.loading)
   const doRemoveImage = useApp((s) => s.doRemoveImage)
-  const doPullImage = useApp((s) => s.doPullImage)
   const [query, setQuery] = useState('')
-  const [pullOpen, setPullOpen] = useState(false)
-  const [cleanOpen, setCleanOpen] = useState(false)
   const [confirmId, setConfirmId] = useState<string | null>(null)
 
   const filtered = useMemo(() => {
@@ -47,17 +64,6 @@ export function ImagesScreen() {
         </div>
       )}
 
-      <div className="btn-row" style={{ marginTop: 10 }}>
-        <button className="btn primary" onClick={() => setPullOpen(true)}>
-          <IconDownload size={16} /> Pull image
-        </button>
-        <button className="btn ghost" onClick={() => setCleanOpen(true)}>
-          <IconBroom size={16} /> Clean up
-        </button>
-      </div>
-
-      {pullOpen && <PullSheet onClose={() => setPullOpen(false)} onPull={(img) => { void doPullImage(img); setPullOpen(false) }} />}
-      {cleanOpen && <CleanupSheet onClose={() => setCleanOpen(false)} />}
       {confirmId && (
         <ConfirmModal
           title="Remove image"

@@ -21,7 +21,7 @@ export function StacksScreen() {
         </div>
       ) : (
         <div className="card-list" style={{ marginTop: 8 }}>
-          {stacks.map((s) => (
+          {[...stacks].sort((a, b) => a.Name.localeCompare(b.Name)).map((s) => (
             <ListItem
               key={s.Id}
               onClick={() => navigate({ name: 'stack-detail', title: s.Name, props: { id: s.Id } })}

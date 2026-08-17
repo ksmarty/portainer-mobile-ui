@@ -29,6 +29,17 @@ server {
         expires 30d;
         add_header Cache-Control "public, immutable";
     }
+
+    # The service worker and manifest must never be cached: a stale sw.js is
+    # the #1 reason installed PWAs don't pick up new versions.
+    location = /sw.js {
+        add_header Cache-Control "no-cache";
+        try_files /sw.js =404;
+    }
+    location = /manifest.json {
+        add_header Cache-Control "no-cache";
+        try_files /manifest.json =404;
+    }
 EOF
 
 if [ -n "$PORTAINER_URL" ]; then

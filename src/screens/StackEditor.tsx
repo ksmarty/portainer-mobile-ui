@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '../store'
 import { IconArrowRight, IconCheck, IconCopy, IconPlus, IconStack, IconTrash } from '../components/Icons'
 import { CodeEditor, type CodeEditorHandle } from '../components/CodeEditor'
@@ -6,6 +6,7 @@ import { Spinner, Tag } from '../components/ui'
 import { dockerRunToCompose, isValidDockerRun } from '../lib/composerize'
 import { formatCompose, normalizeCompose } from '../lib/compose'
 import { sanitizeName } from '../lib/utils'
+import { getStackFile } from '../lib/api'
 
 const SAMPLE_COMPOSE = `version: "3.8"
 services:
@@ -61,6 +62,25 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
   const [busy, setBusy] = useState(false)
   const [notes, setNotes] = useState<{ error?: string; warnings: string[] }>({ warnings: [] })
   const editorRef = useRef<CodeEditorHandle>(null)
+
+  // When editing an existing stack, load its current compose file — the stack
+  // list endpoint doesn't include the file contents.
+  useEffect(() => {
+    if (!stackId) return
+    if (existing?.File) {
+      setCompose(existing.File)
+      return
+    }
+    let alive = true
+    getStackFile(stackId)
+      .then((f) => {
+        if (alive) setCompose(f)
+      })
+      .catch(() => {}) // keep the sample if the file can't be loaded
+    return () => {
+      alive = false
+    }
+  }, [stackId, existing?.File])
 
   const convert = () => {
     if (!isValidDockerRun(run)) {

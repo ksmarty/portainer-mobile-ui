@@ -94,8 +94,22 @@ a {
 .app-shell {
   max-width: 520px;
   margin: 0 auto;
-  min-height: var(--app-height, 100dvh);
+  /* Fixed-height column: header and bottom nav stay put, only the middle
+     (.app-scroll) scrolls. */
+  height: var(--app-height, 100dvh);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   position: relative;
+}
+
+.app-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .page {
@@ -357,6 +371,11 @@ a {
   background: var(--surface-3);
   color: var(--text-dim);
   flex: none;
+  /* Keep all labels the same size/shape even when one is very long */
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .mono {

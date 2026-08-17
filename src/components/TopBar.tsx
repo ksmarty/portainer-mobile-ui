@@ -1,7 +1,8 @@
+import type { ReactNode } from 'react'
 import { useApp } from '../store'
 import { IconChevronLeft, IconMenu, IconRefresh } from './Icons'
 
-export function TopBar({ back = false }: { back?: boolean }) {
+export function TopBar({ back = false, right }: { back?: boolean; right?: ReactNode }) {
   const screen = useApp((s) => s.screen)
   const navigate = useApp((s) => s.navigate)
   const backFn = useApp((s) => s.back)
@@ -36,6 +37,7 @@ export function TopBar({ back = false }: { back?: boolean }) {
             {ep?.Name || 'No endpoint'}
           </div>
         </div>
+        {right}
         <button
           className="icon-btn"
           onClick={() => void refresh()}

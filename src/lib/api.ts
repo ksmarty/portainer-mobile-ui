@@ -226,6 +226,7 @@ export function getDashboard(): Promise<DashboardStats> {
       memoryUsed: 0,
       memoryTotal: 0,
     }
+    const stacksP = getStacks()
     for (const ep of eps.filter((e) => e.Status === 1)) {
       try {
         const [containers, images, volumes, networks, info] = await Promise.all([
@@ -242,24 +243,49 @@ export function getDashboard(): Promise<DashboardStats> {
         total.volumes += volumes.length
         total.networks += networks.length
         total.memoryTotal += info.MemTotal || 0
-        // Live CPU + memory usage: one-shot stats per running container.
+        // Live CPU + memory usage. One-shot stats report precpu_stats equal to
+        // cpu_stats (delta 0), so sample twice ~1.5s apart and diff them.
         const running = containers.filter((c) => c.State === 'running')
         if (running.length > 0) {
-          const stats = await Promise.all(running.map((c) => getContainerStats(ep.Id, c.Id)))
-          for (const s of stats) {
-            total.cpu += s.cpuPercent
-            total.memoryUsed += s.memUsage
+          const ids = running.map((c) => c.Id)
+          const a = await sampleContainerUsage(ep.Id, ids)
+          await new Promise((r) => setTimeout(r, 1500))
+          const b = await sampleContainerUsage(ep.Id, ids)
+          for (let k = 0; k < b.length; k++) {
+            const dTotal = b[k].total - a[k].total
+            const dSys = b[k].sys - a[k].sys
+            if (dSys > 0 && dTotal >= 0) total.cpu += (dTotal / dSys) * b[k].cpus * 100
+            total.memoryUsed += b[k].mem
           }
         }
       } catch {
         // skip unreachable endpoint
       }
     }
+    total.stacks = (await stacksP).length
     total.cpu = Math.min(100, Math.round(total.cpu))
     total.memory =
       total.memoryTotal > 0 ? Math.min(100, Math.round((total.memoryUsed / total.memoryTotal) * 100)) : 0
     return total
   })()
+}
+
+async function sampleContainerUsage(
+  endpointId: number,
+  ids: string[],
+): Promise<{ total: number; sys: number; cpus: number; mem: number }[]> {
+  return Promise.all(
+    ids.map((id) =>
+      portainerFetch<any>(dockerPath(endpointId, `/containers/${id}/stats`), {}, { stream: 0, 'one-shot': 1 }).then(
+        (raw) => ({
+          total: raw.cpu_stats?.cpu_usage?.total_usage ?? 0,
+          sys: raw.cpu_stats?.system_cpu_usage ?? 0,
+          cpus: raw.cpu_stats?.online_cpus || 1,
+          mem: raw.memory_stats?.usage ?? 0,
+        }),
+      ),
+    ),
+  )
 }
 
 /* ------------------------------ containers -------------------------------- */
@@ -309,27 +335,44 @@ export function createContainer(endpointId: number, body: any): Promise<{ Id: st
 export function getContainerLogs(endpointId: number, id: string, tail = 100): Promise<LogLine[]> {
   if (isDemo()) return demoDelay(demoLogs(id, tail))
   return (async () => {
-    const raw = await portainerFetch<string>(
-      dockerPath(endpointId, `/containers/${id}/logs`),
-      {},
-      { stdout: 1, stderr: 1, timestamps: 1, tail },
-    )
+    const raw = await portainerFetchBinary(dockerPath(endpointId, `/containers/${id}/logs`), {
+      stdout: 1,
+      stderr: 1,
+      timestamps: 1,
+      tail,
+    })
     return parseDockerLogs(raw)
   })()
 }
 
-export function parseDockerLogs(raw: string): LogLine[] {
-  // Docker multiplexed stream: 8-byte header per frame
+async function portainerFetchBinary(path: string, params?: Record<string, unknown>): Promise<Uint8Array> {
+  const cfg = getConfig()
+  if (!cfg.url) throw new ApiError('No Portainer URL configured. Add a connection in Settings.', 0)
+  const base = apiBase(cfg.url)
+  const qs = params
+    ? '?' +
+      new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString()
+    : ''
+  const headers: Record<string, string> = {}
+  if (cfg.token) headers[cfg.isJwt ? 'Authorization' : 'X-API-Key'] = cfg.token
+  const res = await fetch(base + path + qs, { headers, signal: AbortSignal.timeout(30000) })
+  if (!res.ok) throw new ApiError(`Request failed (${res.status})`, res.status)
+  return new Uint8Array(await res.arrayBuffer())
+}
+
+export function parseDockerLogs(raw: Uint8Array): LogLine[] {
+  // Docker multiplexed stream: 8-byte header per frame (byte 0 = stream type,
+  // bytes 4-7 = big-endian payload length). Parse on bytes — decoding the
+  // response as text first corrupts both the headers and multi-byte log
+  // content.
   const lines: LogLine[] = []
   let i = 0
-  const buf = new Uint8Array(raw.length)
-  for (let j = 0; j < raw.length; j++) buf[j] = raw.charCodeAt(j)
-  while (i + 8 <= buf.length) {
-    const stream = buf[i]
-    const size = (buf[i + 4] << 24) | (buf[i + 5] << 16) | (buf[i + 6] << 8) | buf[i + 7]
+  while (i + 8 <= raw.length) {
+    const stream = raw[i]
+    const size = ((raw[i + 4] << 24) | (raw[i + 5] << 16) | (raw[i + 6] << 8) | raw[i + 7]) >>> 0
     i += 8
-    if (i + size > buf.length) break
-    let text = new TextDecoder().decode(buf.slice(i, i + size)).replace(/\n$/, '')
+    if (i + size > raw.length) break
+    let text = new TextDecoder().decode(raw.subarray(i, i + size)).replace(/\n$/, '')
     const ts = text.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z)\s?(.*)$/)
     if (ts) text = ts[2]
     lines.push({
@@ -480,7 +523,39 @@ export function getNetworks(endpointId: number): Promise<Network[]> {
   const key = cacheKey(dockerPath(endpointId, '/networks'))
   const cached = getCache<Network[]>(key)
   if (cached) return Promise.resolve(cached)
-  return portainerFetch<Network[]>(dockerPath(endpointId, '/networks')).then((d) => setCache(key, d, 5000))
+  // `docker network ls` doesn't include container memberships, so count
+  // connections from each container's NetworkSettings instead.
+  return (async () => {
+    const [nets, containers] = await Promise.all([
+      portainerFetch<any[]>(dockerPath(endpointId, '/networks')),
+      portainerFetch<any[]>(dockerPath(endpointId, '/containers/json'), undefined, { all: 1, size: 0 }),
+    ])
+    const enriched: Network[] = nets.map((n) => {
+      const members: Network['Containers'] = []
+      for (const c of containers) {
+        const entry = c.NetworkSettings?.Networks?.[n.Name]
+        if (entry) {
+          members.push({
+            Id: c.Id,
+            Name: (c.Names?.[0] || '').replace(/^\//, ''),
+            IPv4: entry.IPAddress || '',
+          })
+        }
+      }
+      return {
+        Id: n.Id,
+        Name: n.Name,
+        Driver: n.Driver || '',
+        Scope: n.Scope || '',
+        Internal: !!n.Internal,
+        Attachable: !!n.Attachable,
+        Created: typeof n.Created === 'string' ? Date.parse(n.Created) || 0 : n.Created || 0,
+        Containers: members,
+      }
+    })
+    setCache(key, enriched, 5000)
+    return enriched
+  })()
 }
 
 export function removeNetwork(endpointId: number, id: string): Promise<void> {
