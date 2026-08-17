@@ -113,7 +113,7 @@ a {
 }
 
 .page {
-  padding: 0 10px calc(64px + var(--safe-bottom));
+  padding: 0 10px calc(18px + var(--safe-bottom));
   animation: fade 0.18s ease;
 }
 
@@ -122,9 +122,9 @@ a {
 .page-editor {
   display: flex;
   flex-direction: column;
-  height: calc(var(--app-height, 100dvh) - 46px - var(--safe-top));
+  height: 100%;
   overflow: hidden;
-  padding-bottom: calc(64px + var(--safe-bottom));
+  padding-bottom: calc(18px + var(--safe-bottom));
 }
 
 @keyframes fade {
@@ -141,8 +141,7 @@ a {
 /* ------------------------------ header ------------------------------ */
 
 .topbar {
-  position: sticky;
-  top: 0;
+  flex: none;
   z-index: 30;
   background: rgba(10, 13, 22, 0.86);
   backdrop-filter: blur(16px);
@@ -551,12 +550,7 @@ a {
 /* ------------------------------ bottom nav ------------------------------ */
 
 .tabbar {
-  position: fixed;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 100%;
-  max-width: 520px;
+  flex: none;
   z-index: 40;
   background: rgba(14, 18, 32, 0.92);
   backdrop-filter: blur(18px);

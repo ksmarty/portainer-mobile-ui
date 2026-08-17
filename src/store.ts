@@ -48,7 +48,7 @@ import type {
   User,
   Volume,
 } from './lib/types'
-import { bytes, uid } from './lib/utils'
+import { bytes, parseImageRef, uid } from './lib/utils'
 
 export interface Screen {
   name: string
@@ -419,23 +419,10 @@ export const useApp = create<AppState>((set, get) => ({
     const ep = endpointId(get())
     const c = get().containers.find((x) => x.Id === id)
     if (!c) return
-    const ref = c.Image || ''
-    // Split repo/tag; digest references are pulled as-is with an empty tag.
-    let from = ref
-    let tag = 'latest'
-    if (ref.includes('@')) {
-      tag = ''
-    } else {
-      const slash = ref.lastIndexOf('/')
-      const colon = ref.lastIndexOf(':')
-      if (colon > slash) {
-        from = ref.slice(0, colon)
-        tag = ref.slice(colon + 1)
-      }
-    }
+    const { from, tag } = parseImageRef(c.Image || '')
     try {
       await pullImage(ep, from, tag)
-      get().toast(`Pulled ${ref}`, 'success')
+      get().toast(`Pulled ${c.Image}`, 'success')
       await get().refresh()
     } catch (e) {
       get().toast((e as Error).message, 'error')
@@ -456,8 +443,9 @@ export const useApp = create<AppState>((set, get) => ({
 
   doPullImage: async (image) => {
     const ep = endpointId(get())
+    const { from, tag } = parseImageRef(image)
     try {
-      await pullImage(ep, image)
+      await pullImage(ep, from, tag)
       get().toast('Image pulled', 'success')
       await get().refresh()
     } catch (e) {

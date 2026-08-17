@@ -6,6 +6,7 @@ import {
   demoDeployStack,
   demoGet,
   demoGetImageInfo,
+  demoGetNetworkInfo,
   demoPruneImages,
   demoPullImage,
   demoRemoveContainer,
@@ -25,6 +26,7 @@ import type {
   ImageInfo,
   LogLine,
   Network,
+  NetworkDetail,
   Registry,
   Settings,
   Stack,
@@ -451,6 +453,36 @@ export function pullImage(endpointId: number, fromImage: string, tag = 'latest')
     return demoDelay(undefined, 700)
   }
   return portainerFetch<void>('/endpoints/' + endpointId + '/docker/images/create', { method: 'POST' }, { fromImage, tag })
+}
+
+// Detailed metadata for one network (docker inspect).
+export function getNetworkInfo(endpointId: number, id: string): Promise<NetworkDetail> {
+  if (isDemo()) return demoDelay(demoGetNetworkInfo(id), 220)
+  return portainerFetch<any>(dockerPath(endpointId, `/networks/${id}`)).then((raw) => ({
+    Id: raw.Id || '',
+    Name: raw.Name || '',
+    Driver: raw.Driver || '',
+    Scope: raw.Scope || '',
+    Internal: !!raw.Internal,
+    Attachable: !!raw.Attachable,
+    EnableIPv6: !!raw.EnableIPv6,
+    IPAM: {
+      Driver: raw.IPAM?.Driver,
+      Config: (raw.IPAM?.Config || []).map((c: any) => ({
+        Subnet: c.Subnet,
+        Gateway: c.Gateway,
+        IPRange: c.IPRange,
+      })),
+    },
+    Options: raw.Options || {},
+    Labels: raw.Labels || {},
+    Created: raw.Created ? Date.parse(raw.Created) || 0 : 0,
+    Containers: Object.values(raw.Containers || {}).map((c: any) => ({
+      Id: c.EndpointID || c.Name || '',
+      Name: c.Name || '',
+      IPv4: c.IPv4Address || '',
+    })),
+  }))
 }
 
 // Detailed metadata for one image (docker inspect).

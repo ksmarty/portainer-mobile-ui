@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useApp } from './store'
 import { TopBar } from './components/TopBar'
 import { TabBar } from './components/TabBar'
@@ -15,6 +15,7 @@ import { StackDetailScreen } from './screens/StackDetail'
 import { StackEditorScreen } from './screens/StackEditor'
 import { VolumesScreen } from './screens/Volumes'
 import { NetworksScreen } from './screens/Networks'
+import { NetworkDetailScreen } from './screens/NetworkDetail'
 import { EndpointsScreen } from './screens/Endpoints'
 import { UsersScreen } from './screens/Users'
 import { TeamsScreen } from './screens/Teams'
@@ -31,10 +32,21 @@ export default function App() {
   const boot = useApp((s) => s.boot)
   const back = useApp((s) => s.back)
   const history = useApp((s) => s.history)
+  const screen = useApp((s) => s.screen)
+  const demo = useApp((s) => s.demo)
+  const user = useApp((s) => s.user)
+  const endpoints = useApp((s) => s.endpoints)
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     void boot()
   }, [boot])
+
+  // Scroll to the top whenever the route changes (e.g. tapping a container in
+  // a stack shouldn't inherit the stack page's scroll position).
+  useEffect(() => {
+    scrollRef.current?.scrollTo(0, 0)
+  }, [screen.name])
 
   // Swipe right to go back (mobile): system gestures like iOS's edge swipe
   // close the tab instead, so handle it in-app. Ignored when the touch starts
@@ -67,9 +79,15 @@ export default function App() {
 
   if (!ready || booting) return <LoadingScreen />
 
+  const authed = demo || !!user || endpoints.length > 0
+  const showTopBar = authed && screen.name !== 'login'
+
   return (
     <div className="app-shell">
-      <div className="app-scroll">
+      {showTopBar && (
+        <TopBar back={screen.name !== 'home'} right={screen.name === 'images' ? <ImageActions /> : undefined} />
+      )}
+      <div className="app-scroll" ref={scrollRef}>
         <Router />
       </div>
       <TabBar />
@@ -86,166 +104,56 @@ function Router() {
 
   const authed = demo || !!user || endpoints.length > 0
 
-  if (!authed) {
-    return <ConnectScreen />
-  }
+  if (!authed) return <ConnectScreen />
 
   switch (screen.name) {
     case 'home':
-      return (
-        <>
-          <TopBar />
-          <HomeScreen />
-        </>
-      )
+      return <HomeScreen />
     case 'containers':
-      return (
-        <>
-          <TopBar back />
-          <ContainersScreen />
-        </>
-      )
+      return <ContainersScreen />
     case 'container-detail':
-      return (
-        <>
-          <TopBar back />
-          <ContainerDetailScreen id={screen.props?.id} />
-        </>
-      )
+      return <ContainerDetailScreen id={screen.props?.id} />
     case 'container-logs':
-      return (
-        <>
-          <TopBar back />
-          <ContainerLogsScreen id={screen.props?.id} />
-        </>
-      )
+      return <ContainerLogsScreen id={screen.props?.id} />
     case 'container-stats':
-      return (
-        <>
-          <TopBar back />
-          <ContainerStatsScreen id={screen.props?.id} />
-        </>
-      )
+      return <ContainerStatsScreen id={screen.props?.id} />
     case 'create-container':
-      return (
-        <>
-          <TopBar back />
-          <CreateContainerScreen />
-        </>
-      )
+      return <CreateContainerScreen />
     case 'images':
-      return (
-        <>
-          <TopBar back right={<ImageActions />} />
-          <ImagesScreen />
-        </>
-      )
+      return <ImagesScreen />
     case 'stacks':
-      return (
-        <>
-          <TopBar back />
-          <StacksScreen />
-        </>
-      )
+      return <StacksScreen />
     case 'stack-detail':
-      return (
-        <>
-          <TopBar back />
-          <StackDetailScreen id={screen.props?.id} />
-        </>
-      )
+      return <StackDetailScreen id={screen.props?.id} />
     case 'stack-file':
-      return (
-        <>
-          <TopBar back />
-          <StackDetailScreen id={screen.props?.id} fileOverride={screen.props?.file} />
-        </>
-      )
+      return <StackDetailScreen id={screen.props?.id} fileOverride={screen.props?.file} />
     case 'deploy-stack':
-      return (
-        <>
-          <TopBar back />
-          <StackEditorScreen />
-        </>
-      )
+      return <StackEditorScreen />
     case 'stack-edit':
-      return (
-        <>
-          <TopBar back />
-          <StackEditorScreen stackId={screen.props?.id} />
-        </>
-      )
+      return <StackEditorScreen stackId={screen.props?.id} />
     case 'volumes':
-      return (
-        <>
-          <TopBar back />
-          <VolumesScreen />
-        </>
-      )
+      return <VolumesScreen />
     case 'networks':
-      return (
-        <>
-          <TopBar back />
-          <NetworksScreen />
-        </>
-      )
+      return <NetworksScreen />
+    case 'network-detail':
+      return <NetworkDetailScreen id={screen.props?.id} />
     case 'endpoints':
-      return (
-        <>
-          <TopBar back />
-          <EndpointsScreen />
-        </>
-      )
+      return <EndpointsScreen />
     case 'users':
-      return (
-        <>
-          <TopBar back />
-          <UsersScreen />
-        </>
-      )
+      return <UsersScreen />
     case 'teams':
-      return (
-        <>
-          <TopBar back />
-          <TeamsScreen />
-        </>
-      )
+      return <TeamsScreen />
     case 'registries':
-      return (
-        <>
-          <TopBar back />
-          <RegistriesScreen />
-        </>
-      )
+      return <RegistriesScreen />
     case 'settings':
-      return (
-        <>
-          <TopBar back />
-          <SettingsScreen />
-        </>
-      )
+      return <SettingsScreen />
     case 'schema-settings':
-      return (
-        <>
-          <TopBar back />
-          <SchemaSettingsScreen />
-        </>
-      )
+      return <SchemaSettingsScreen />
     case 'connect':
-      return (
-        <>
-          <TopBar back />
-          <ConnectScreen />
-        </>
-      )
+      return <ConnectScreen />
     case 'login':
       return <LoginScreen />
     default:
-      return (
-        <>
-          <TopBar />
-          <HomeScreen />
-        </>
-      )
+      return <HomeScreen />
   }
 }

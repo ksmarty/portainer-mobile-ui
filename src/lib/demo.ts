@@ -6,6 +6,7 @@ import type {
   ImageInfo,
   LogLine,
   Network,
+  NetworkDetail,
   Registry,
   Settings,
   Stack,
@@ -608,6 +609,28 @@ export function demoRecreateContainer(id: string) {
   c.Image = (c.Image || 'demo/image').split(':')[0] + ':latest'
   c.ImageID = 'sha256:' + 'b'.repeat(64)
   c.Status = 'Up About a minute'
+}
+
+export function demoGetNetworkInfo(id: string): NetworkDetail {
+  const n = demoState.networks.find((x) => x.Id === id) || demoState.networks[0]
+  const base = n?.Name ? 100 + Math.abs(id.length * 7) : 172
+  return {
+    Id: id,
+    Name: n?.Name || 'bridge',
+    Driver: n?.Driver || 'bridge',
+    Scope: 'local',
+    Internal: !!n?.Internal,
+    Attachable: true,
+    EnableIPv6: false,
+    IPAM: {
+      Driver: 'default',
+      Config: [{ Subnet: `172.${base}.0.0/16`, Gateway: `172.${base}.0.1` }],
+    },
+    Options: {},
+    Labels: { 'com.docker.network.bridge.name': n?.Name || 'bridge' },
+    Created: n?.Created || Date.now(),
+    Containers: n?.Containers || [],
+  }
 }
 
 export function demoGetImageInfo(imageId: string): ImageInfo {

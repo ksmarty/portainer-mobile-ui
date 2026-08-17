@@ -73,6 +73,21 @@ export interface Network {
   Containers: { Id: string; Name: string; IPv4: string }[]
 }
 
+export interface NetworkDetail {
+  Id: string
+  Name: string
+  Driver: string
+  Scope: string
+  Internal: boolean
+  Attachable: boolean
+  EnableIPv6: boolean
+  IPAM: { Driver?: string; Config: { Subnet?: string; Gateway?: string; IPRange?: string }[] }
+  Options: Record<string, string>
+  Labels: Record<string, string>
+  Created: number
+  Containers: { Id: string; Name: string; IPv4: string }[]
+}
+
 export interface Volume {
   Name: string
   Driver: string

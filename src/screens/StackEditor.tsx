@@ -299,7 +299,12 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
         </div>
       )}
 
-      <button className="btn primary full" onClick={save} disabled={busy || !name.trim() || !compose.trim()}>
+      <button
+        className="btn primary full"
+        style={{ marginTop: 14 }}
+        onClick={save}
+        disabled={busy || !name.trim() || !compose.trim()}
+      >
         {busy ? <Spinner size={17} /> : existing ? <IconCheck size={17} /> : <IconStack size={17} />}
         {busy ? 'Saving…' : existing ? 'Save changes' : 'Deploy stack'}
       </button>

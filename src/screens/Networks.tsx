@@ -7,6 +7,7 @@ import { ConfirmModal } from '../components/ConfirmModal'
 export function NetworksScreen() {
   const networks = useApp((s) => s.networks)
   const loading = useApp((s) => s.loading)
+  const navigate = useApp((s) => s.navigate)
   const doRemoveNetwork = useApp((s) => s.doRemoveNetwork)
   const [confirmId, setConfirmId] = useState<string | null>(null)
 
@@ -24,6 +25,7 @@ export function NetworksScreen() {
           {networks.map((n) => (
             <ListItem
               key={n.Id}
+              onClick={() => navigate({ name: 'network-detail', title: n.Name, props: { id: n.Id } })}
               icon={
                 <div className="item-icon" style={{ background: 'var(--blue-soft)', color: 'var(--blue)' }}>
                   <IconNetwork size={19} />
