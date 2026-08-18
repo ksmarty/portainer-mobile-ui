@@ -150,6 +150,8 @@ a {
   /* In standalone mode the webview extends under the Dynamic Island/notch;
      pad the bar down so its content clears the status area. */
   padding-top: var(--safe-top);
+  /* Prevent iOS rubber-band scrolling when touching the top bar */
+  touch-action: none;
 }
 
 .topbar-inner {
@@ -557,11 +559,13 @@ a {
   -webkit-backdrop-filter: blur(18px);
   border-top: 1px solid var(--border-soft);
   padding-bottom: var(--safe-bottom);
+  /* Prevent iOS rubber-band scrolling when touching the bottom nav */
+  touch-action: none;
 }
 
 .tabbar-inner {
   display: flex;
-  padding: 3px 4px 5px;
+  padding: 3px 4px 2px;
 }
 
 .tab {
