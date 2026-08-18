@@ -450,16 +450,19 @@ export function removeImage(endpointId: number, id: string, force = false): Prom
   return portainerFetch<void>(dockerPath(endpointId, `/images/${id}`), { method: 'DELETE' }, { force, noprune: 0 })
 }
 
-export function pullImage(endpointId: number, fromImage: string, tag = 'latest'): Promise<void> {
+export function pullImage(endpointId: number, image: string): Promise<void> {
   if (isDemo()) {
-    demoPullImage(tag === 'latest' ? fromImage : `${fromImage}:${tag}`)
+    demoPullImage(image)
     return demoDelay(undefined, 700)
   }
-  const params: Record<string, unknown> = { fromImage }
-  // Only include the tag when there is one: an empty tag query param gets
-  // rejected by some Portainer versions.
-  if (tag) params.tag = tag
-  return portainerFetch<void>('/endpoints/' + endpointId + '/docker/images/create', { method: 'POST' }, params)
+  // Match Portainer's own frontend exactly: POST /images/create with the full
+  // image reference in fromImage and NO separate tag param — some Portainer
+  // versions reject the tag param combination.
+  return portainerFetch<void>(
+    '/endpoints/' + endpointId + '/docker/images/create',
+    { method: 'POST' },
+    { fromImage: image.trim() },
+  )
 }
 
 // Detailed metadata for one network (docker inspect).

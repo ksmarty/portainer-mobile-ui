@@ -48,7 +48,7 @@ import type {
   User,
   Volume,
 } from './lib/types'
-import { bytes, parseImageRef, uid } from './lib/utils'
+import { bytes, uid } from './lib/utils'
 
 export interface Screen {
   name: string
@@ -419,9 +419,8 @@ export const useApp = create<AppState>((set, get) => ({
     const ep = endpointId(get())
     const c = get().containers.find((x) => x.Id === id)
     if (!c) return
-    const { from, tag } = parseImageRef(c.Image || '')
     try {
-      await pullImage(ep, from, tag)
+      await pullImage(ep, c.Image || '')
       get().toast(`Pulled ${c.Image}`, 'success')
       await get().refresh()
     } catch (e) {
@@ -443,9 +442,8 @@ export const useApp = create<AppState>((set, get) => ({
 
   doPullImage: async (image) => {
     const ep = endpointId(get())
-    const { from, tag } = parseImageRef(image)
     try {
-      await pullImage(ep, from, tag)
+      await pullImage(ep, image)
       get().toast('Image pulled', 'success')
       await get().refresh()
     } catch (e) {
