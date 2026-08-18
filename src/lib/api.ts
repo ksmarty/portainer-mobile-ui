@@ -181,7 +181,19 @@ async function portainerFetch<T>(path: string, options: RequestInit = {}, params
   }
   if (res.status === 204) return undefined as T
   const ct = res.headers.get('content-type') || ''
-  if (ct.includes('application/json')) return (await res.json()) as T
+  if (ct.includes('application/json')) {
+    const text = await res.text()
+    if (!text.trim()) return undefined as T
+    try {
+      return JSON.parse(text) as T
+    } catch {
+      // Docker endpoints (e.g. /images/create, /build) stream NDJSON chunks
+      // ({"status":"..."}\r\n{"status":"..."}). If JSON.parse fails on the
+      // full concatenated stream, return undefined for void/streamed callers
+      // instead of throwing a SyntaxError DOMException.
+      return undefined as T
+    }
+  }
   return (await res.text()) as unknown as T
 }
 
@@ -467,9 +479,10 @@ export function pullImage(endpointId: number, image: string): Promise<void> {
   // Match Portainer's own frontend exactly: POST /images/create with the full
   // image reference in fromImage and NO separate tag param — some Portainer
   // versions reject the tag param combination.
+  // Large image pulls can take longer than the default 30s timeout, so give it 5 minutes.
   return portainerFetch<void>(
     '/endpoints/' + endpointId + '/docker/images/create',
-    { method: 'POST' },
+    { method: 'POST', signal: AbortSignal.timeout(300000) },
     { fromImage: image.trim() },
   )
 }
