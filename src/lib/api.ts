@@ -168,7 +168,16 @@ async function portainerFetch<T>(path: string, options: RequestInit = {}, params
     if (res.status === 401 || res.status === 403) {
       throw new ApiError(`Authentication failed (${res.status}) — check your API key or JWT.`, res.status)
     }
-    throw new ApiError(text || `Request failed (${res.status})`, res.status)
+    let msg = text
+    if (text) {
+      try {
+        const parsed = JSON.parse(text)
+        if (parsed.message) msg = parsed.message
+        else if (parsed.details) msg = parsed.details
+        else if (parsed.err) msg = parsed.err
+      } catch {}
+    }
+    throw new ApiError(msg || `Request failed (${res.status})`, res.status)
   }
   if (res.status === 204) return undefined as T
   const ct = res.headers.get('content-type') || ''
