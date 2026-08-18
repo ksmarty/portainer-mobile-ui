@@ -61,6 +61,7 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
   )
   const [busy, setBusy] = useState(false)
   const [notes, setNotes] = useState<{ error?: string; warnings: string[] }>({ warnings: [] })
+  const [envRaw, setEnvRaw] = useState(false)
   const editorRef = useRef<CodeEditorHandle>(null)
 
   // When editing an existing stack, load its current compose file — the stack
@@ -230,56 +231,43 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
           <div className="card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
               <span style={{ fontSize: 12.5, fontWeight: 700 }}>Stack environment variables</span>
-              <button className="btn sm ghost" onClick={() => addEnvRow()}>
-                <IconPlus size={14} /> Add
-              </button>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button className="btn sm ghost" onClick={() => { if (envRaw) { const ta = document.getElementById('env-raw') as HTMLTextAreaElement; if (ta) { const lines = ta.value.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).map(l => { const e = l.indexOf('='); return e > 0 ? { key: l.slice(0, e).trim(), value: l.slice(e + 1).trim() } : { key: l.trim(), value: '' } }); setEnvRows(lines); setEnvRaw(false); } } else { setEnvRaw(true); } }}>
+                  {envRaw ? 'Structured' : 'Raw .env'}
+                </button>
+                {!envRaw && <button className="btn sm ghost" onClick={() => addEnvRow()}><IconPlus size={14} /> Add</button>}
+              </div>
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 8 }}>
-              Used for ${'{'}VAR{'}'} interpolation in the compose file.
+              Used for {'${'}VAR{'}'} interpolation in the compose file.
             </div>
 
-            {envRows.length === 0 && (
-              <div style={{ color: 'var(--text-faint)', fontSize: 12.5, padding: '10px 0', textAlign: 'center' }}>
-                No variables yet. Add one or tap a suggestion below.
+            {envRaw ? (
+              <textarea id="env-raw" className="textarea mono" style={{ minHeight: 180, fontSize: 12 }} defaultValue={envRows.map((r) => `${r.key}=${r.value}`).join('\n')} spellCheck={false} placeholder="# Comments are ignored when switching back" />
+            ) : (
+              <div>
+                {envRows.length === 0 && (
+                  <div style={{ color: 'var(--text-faint)', fontSize: 12.5, padding: '10px 0', textAlign: 'center' }}>
+                    No variables yet. Add one or tap a suggestion below.
+                  </div>
+                )}
+                {envRows.map((row, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                    <input className="input mono" style={{ flex: '1 1 40%' }} value={row.key} onChange={(e) => updateEnvRow(i, { key: e.target.value })} placeholder="KEY" autoCapitalize="none" autoCorrect="off" list="env-keys" />
+                    <input className="input" style={{ flex: '1 1 60%' }} value={row.value} onChange={(e) => updateEnvRow(i, { value: e.target.value })} placeholder="value" autoCapitalize="none" autoCorrect="off" />
+                    <button className="icon-btn" style={{ width: 34, height: 34 }} onClick={() => removeEnvRow(i)} aria-label="Remove"><IconTrash size={15} /></button>
+                  </div>
+                ))}
+                <datalist id="env-keys">
+                  {ENV_SUGGESTIONS.map((key) => (
+                    <option key={key} value={key} />
+                  ))}
+                </datalist>
               </div>
             )}
-
-            {envRows.map((row, i) => (
-              <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-                <input
-                  className="input mono"
-                  style={{ flex: '1 1 40%' }}
-                  value={row.key}
-                  onChange={(e) => updateEnvRow(i, { key: e.target.value })}
-                  placeholder="KEY"
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  list="env-keys"
-                />
-                <input
-                  className="input"
-                  style={{ flex: '1 1 60%' }}
-                  value={row.value}
-                  onChange={(e) => updateEnvRow(i, { value: e.target.value })}
-                  placeholder="value"
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                />
-                <button className="icon-btn" style={{ width: 34, height: 34 }} onClick={() => removeEnvRow(i)} aria-label="Remove">
-                  <IconTrash size={15} />
-                </button>
-              </div>
-            ))}
           </div>
-
-          <datalist id="env-keys">
-            {ENV_SUGGESTIONS.map((key) => (
-              <option key={key} value={key} />
-            ))}
-          </datalist>
         </div>
       )}
-
       {mode === 'run' && (
         <div className="field" style={{ marginTop: 8 }}>
           <label>Paste a docker run command</label>

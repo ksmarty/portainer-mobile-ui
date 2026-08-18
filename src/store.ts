@@ -444,8 +444,8 @@ export const useApp = create<AppState>((set, get) => ({
     const ep = endpointId(get())
     try {
       await pullImage(ep, image)
-      get().toast('Image pulled', 'success')
       await get().refresh()
+      get().toast('Image pulled', 'success')
     } catch (e) {
       get().toast((e as Error).message, 'error')
       throw e
@@ -515,7 +515,9 @@ export const useApp = create<AppState>((set, get) => ({
   doUpdateStack: async (id, file, env = []) => {
     try {
       const { updateStack } = await import('./lib/api')
-      await updateStack(id, file, env)
+      const existing = get().stacks.find((s) => s.Id === id)
+      const ep = existing?.EndpointId ?? endpointId(get())
+      await updateStack(id, ep, file, env)
       get().toast('Stack updated', 'success')
       await get().refresh()
     } catch (e) {

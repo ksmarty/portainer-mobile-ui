@@ -643,7 +643,7 @@ export function deployStack(name: string, file: string, env: { name: string; val
   })
 }
 
-export function updateStack(id: number, file: string, env: { name: string; value: string }[] = []): Promise<void> {
+export function updateStack(id: number, endpointId: number, file: string, env: { name: string; value: string }[] = []): Promise<void> {
   if (isDemo()) {
     const s = demoState.stacks.find((x) => x.Id === id)
     if (s) {
@@ -653,7 +653,7 @@ export function updateStack(id: number, file: string, env: { name: string; value
     }
     return demoDelay(undefined, 400)
   }
-  return portainerFetch<void>(`/stacks/${id}?endpointId=1`, {
+  return portainerFetch<void>(`/stacks/${id}?endpointId=${endpointId}`, {
     method: 'PUT',
     body: JSON.stringify({ stackFileContent: file, env }),
   })
