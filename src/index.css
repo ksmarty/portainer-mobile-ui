@@ -55,7 +55,8 @@ body {
 }
 
 #root {
-  height: var(--app-height, 100dvh);
+  height: 100%;
+  overflow: hidden;
 }
 
 button {
@@ -94,16 +95,17 @@ a {
 /* ------------------------------ layout ------------------------------ */
 
 .app-shell {
-  max-width: 520px;
+  /* Anchor the shell to the visual viewport directly instead of computing a
+     pixel height in JS. A JS height could be captured mid-transition (URL
+     bar, keyboard) and leave the shell short — the nav floating up — or
+     half-height after switching tabs. */
+  position: fixed;
+  inset: 0;
   margin: 0 auto;
-  /* Fixed-height column: header and bottom nav stay put, only the middle
-     (.app-scroll) scrolls. 100% of #root, which is pinned to the visual
-     viewport for iOS PWAs. */
-  height: 100%;
+  max-width: 520px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  position: relative;
 }
 
 .app-scroll {

@@ -19,33 +19,6 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Portainer" />
-
-    <script>
-      // Viewport height for iOS Safari and installed PWAs.
-      // iOS reports the layout viewport independently of the *visible* area,
-      // so 100vh / height:100% can be taller than what the user actually sees
-      // (content ends up hidden behind the browser toolbar or the home
-      // indicator). Track the visual viewport instead and expose it as
-      // --app-height; CSS falls back to 100dvh when JS is unavailable.
-      (function () {
-        var root = document.documentElement
-        function setHeight() {
-          var vv = window.visualViewport
-          var h = (vv && vv.height) || window.innerHeight || 0
-          if (h > 0) root.style.setProperty('--app-height', Math.round(h) + 'px')
-        }
-        setHeight()
-        window.addEventListener('resize', setHeight, { passive: true })
-        window.addEventListener('orientationchange', setHeight, { passive: true })
-        if (window.visualViewport) {
-          window.visualViewport.addEventListener('resize', setHeight, { passive: true })
-          window.visualViewport.addEventListener('scroll', setHeight, { passive: true })
-        }
-        document.addEventListener('visibilitychange', function () {
-          if (!document.hidden) setHeight()
-        })
-      })()
-    </script>
   </head>
   <body>
     <div id="root"></div>
