@@ -36,11 +36,6 @@ import type {
 } from './types'
 import { jsonClone } from './utils'
 
-export interface AuthResponse {
-  jwt: string
-  user: User
-}
-
 export interface ConnectionConfig {
   url: string
   token: string
@@ -200,21 +195,6 @@ function dockerPath(endpointId: number, path: string): string {
   return `/endpoints/${endpointId}/docker${path}`
 }
 
-/* ------------------------------- auth ----------------------------------- */
-
-export async function apiLogin(username: string, password: string): Promise<AuthResponse> {
-  const cfg = getConfig()
-  const res = await fetch(apiBase(cfg.url) + '/auth', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
-  })
-  if (!res.ok) throw new ApiError('Invalid credentials', res.status)
-  const data = await res.json()
-  const user = await portainerFetch<User>('/users/' + data.Id)
-  return { jwt: data.jwt, user }
-}
-
 /* ------------------------------ endpoints -------------------------------- */
 
 export function getEndpoints(): Promise<Endpoint[]> {
@@ -224,7 +204,7 @@ export function getEndpoints(): Promise<Endpoint[]> {
 
 export async function getEndpoint(id: number): Promise<Endpoint> {
   if (isDemo()) return demoDelay(demoGet<Endpoint[]>('endpoints').find((e) => e.Id === id)!)
-  const key = cacheKey(`/endpoints/${id}/docker/info`)
+  const key = cacheKey(`/endpoints/${id}`)
   const cached = getCache<Endpoint>(key)
   if (cached) return cached
   const ep = await portainerFetch<Endpoint>('/endpoints/' + id)
@@ -359,12 +339,17 @@ export function removeContainer(endpointId: number, id: string, force = false): 
   return portainerFetch<void>(dockerPath(endpointId, `/containers/${id}`), { method: 'DELETE' }, { force, v: 1 })
 }
 
-export function createContainer(endpointId: number, body: any): Promise<{ Id: string }> {
+export function createContainer(endpointId: number, name: string, image: string): Promise<{ Id: string }> {
   if (isDemo()) {
-    demoCreateContainer(body.Name || body.Image, body.Image)
+    demoCreateContainer(name, image)
     return demoDelay({ Id: 'demo-' + Date.now() })
   }
-  return portainerFetch<{ Id: string }>(dockerPath(endpointId, '/containers/create'), { method: 'POST', body: JSON.stringify(body) })
+  // Docker reads the container name from the `?name=` query, NOT the body.
+  return portainerFetch<{ Id: string }>(
+    dockerPath(endpointId, '/containers/create'),
+    { method: 'POST', body: JSON.stringify({ Image: image }) },
+    { name },
+  )
 }
 
 export function getContainerLogs(endpointId: number, id: string, tail = 100): Promise<LogLine[]> {
@@ -408,7 +393,7 @@ export function parseDockerLogs(raw: Uint8Array): LogLine[] {
     i += 8
     if (i + size > raw.length) break
     let text = new TextDecoder().decode(raw.subarray(i, i + size)).replace(/\n$/, '')
-    const ts = text.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z)\s?(.*)$/)
+    const ts = text.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z)\s?([\s\S]*)$/)
     if (ts) text = ts[2]
     lines.push({
       id: `log-${lines.length}-${Math.random()}`,
@@ -428,16 +413,20 @@ export function getContainerStats(endpointId: number, id: string): Promise<Stats
     const sysDelta = raw.cpu_stats.system_cpu_usage - raw.precpu_stats.system_cpu_usage
     const cpus = raw.cpu_stats.online_cpus || 1
     const cpuPercent = sysDelta > 0 ? (cpuDelta / sysDelta) * cpus * 100 : 0
-    const memUsage = raw.memory_stats.usage ?? 0
-    const memLimit = raw.memory_stats.limit ?? 0
+    // Docker counts page cache in `usage`; subtract it like `docker stats` does.
+    const memUsage = Math.max(0, (raw.memory_stats?.usage ?? 0) - (raw.memory_stats?.stats?.cache ?? 0))
+    const memLimit = raw.memory_stats?.limit ?? 0
     const memPercent = memLimit > 0 ? (memUsage / memLimit) * 100 : 0
+    const nets: Record<string, any> = raw.networks || {}
+    const netRx = Object.values(nets).reduce((s, n) => s + (n?.rx_bytes ?? 0), 0)
+    const netTx = Object.values(nets).reduce((s, n) => s + (n?.tx_bytes ?? 0), 0)
     return {
       cpuPercent,
       memPercent,
       memUsage,
       memLimit,
-      netRx: raw.networks?.eth0?.rx_bytes ?? 0,
-      netTx: raw.networks?.eth0?.tx_bytes ?? 0,
+      netRx,
+      netTx,
       blockRead: raw.blkio_stats?.io_service_bytes_recursive?.find((b: any) => b.op === 'Read')?.value ?? 0,
       blockWrite: raw.blkio_stats?.io_service_bytes_recursive?.find((b: any) => b.op === 'Write')?.value ?? 0,
       pids: raw.pids_stats?.current ?? 0,
@@ -544,7 +533,8 @@ export function getVolumes(endpointId: number): Promise<Volume[]> {
   const cached = getCache<Volume[]>(key)
   if (cached) return Promise.resolve(cached)
   return portainerFetch<any>(dockerPath(endpointId, '/volumes')).then((d) => {
-    const list: Volume[] = (d.Volumes || d || []).map((v: any) => ({
+    const raw: any[] = Array.isArray(d?.Volumes) ? d.Volumes : Array.isArray(d) ? d : []
+    const list: Volume[] = raw.map((v: any) => ({
       Name: v.Name,
       Driver: v.Driver,
       Mountpoint: v.Mountpoint,
@@ -632,12 +622,12 @@ export function getStackFile(id: number): Promise<string> {
   )
 }
 
-export function deployStack(name: string, file: string, env: { name: string; value: string }[] = []): Promise<void> {
+export function deployStack(endpointId: number, name: string, file: string, env: { name: string; value: string }[] = []): Promise<void> {
   if (isDemo()) {
     demoDeployStack(name, file, env)
     return demoDelay(undefined, 500)
   }
-  return portainerFetch<void>('/stacks?method=string&type=2&endpointId=1', {
+  return portainerFetch<void>(`/stacks?method=string&type=2&endpointId=${endpointId}`, {
     method: 'POST',
     body: JSON.stringify({ name, stackFileContent: file, env }),
   })
@@ -659,17 +649,19 @@ export function updateStack(id: number, endpointId: number, file: string, env: {
   })
 }
 
-export function removeStack(id: number): Promise<void> {
+export function removeStack(id: number, endpointId?: number): Promise<void> {
   if (isDemo()) {
     demoRemoveStack(id)
     return demoDelay(undefined)
   }
-  return portainerFetch<void>(`/stacks/${id}`, { method: 'DELETE' })
+  const qs = endpointId != null ? `?endpointId=${endpointId}` : ''
+  return portainerFetch<void>(`/stacks/${id}${qs}`, { method: 'DELETE' })
 }
 
-export function stackAction(id: number, action: 'start' | 'stop'): Promise<void> {
+export function stackAction(id: number, action: 'start' | 'stop', endpointId?: number): Promise<void> {
   if (isDemo()) return demoDelay(undefined)
-  return portainerFetch<void>(`/stacks/${id}/${action}`, { method: 'POST' })
+  const qs = endpointId != null ? `?endpointId=${endpointId}` : ''
+  return portainerFetch<void>(`/stacks/${id}/${action}${qs}`, { method: 'POST' })
 }
 
 /* ------------------------------- settings --------------------------------- */

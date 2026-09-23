@@ -46,10 +46,14 @@ export function ContainerDetailScreen({ id }: { id: string }) {
   const quickActions = [
     c.State === 'running'
       ? { label: 'Stop', icon: <IconStop size={19} />, cls: 'warn', action: () => doContainerAction(id, 'stop') }
-      : { label: 'Start', icon: <IconPlay size={19} />, cls: 'ok', action: () => doContainerAction(id, 'start') },
+      : c.State === 'paused'
+        ? { label: 'Unpause', icon: <IconPlay size={19} />, cls: 'ok', action: () => doContainerAction(id, 'unpause') }
+        : { label: 'Start', icon: <IconPlay size={19} />, cls: 'ok', action: () => doContainerAction(id, 'start') },
     c.State === 'running'
       ? { label: 'Pause', icon: <IconPause size={19} />, cls: '', action: () => doContainerAction(id, 'pause') }
-      : { label: 'Restart', icon: <IconRestart size={19} />, cls: '', action: () => doContainerAction(id, 'restart') },
+      : c.State === 'paused'
+        ? { label: 'Stop', icon: <IconStop size={19} />, cls: 'warn', action: () => doContainerAction(id, 'stop') }
+        : { label: 'Restart', icon: <IconRestart size={19} />, cls: '', action: () => doContainerAction(id, 'restart') },
     { label: 'Logs', icon: <IconTerminal size={19} />, cls: '', action: () => navigate({ name: 'container-logs', title: `${name} logs`, props: { id } }) },
     { label: 'Stats', icon: <IconActivity size={19} />, cls: '', action: () => navigate({ name: 'container-stats', title: `${name} stats`, props: { id } }) },
     { label: 'Pull image', icon: <IconDownload size={19} />, cls: '', action: () => setConfirmFetch(true) },

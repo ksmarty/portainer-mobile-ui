@@ -64,14 +64,6 @@ export const IconDatabase = (p: IconProps) => (
   </Svg>
 )
 
-export const IconShare = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
-    <path d="m16 6-4-4-4 4" />
-    <path d="M12 2v13" />
-  </Svg>
-)
-
 export const IconSettings = (p: IconProps) => (
   <Svg {...p}>
     <circle cx="12" cy="12" r="3" />
@@ -142,12 +134,6 @@ export const IconChevronLeft = (p: IconProps) => (
 export const IconMenu = (p: IconProps) => (
   <Svg {...p}>
     <path d="M4 6h16M4 12h16M4 18h16" />
-  </Svg>
-)
-
-export const IconClose = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M18 6 6 18M6 6l12 12" />
   </Svg>
 )
 
@@ -235,14 +221,6 @@ export const IconDownload = (p: IconProps) => (
   </Svg>
 )
 
-export const IconUpload = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-    <path d="m7 8 5-5 5 5" />
-    <path d="M12 3v12" />
-  </Svg>
-)
-
 export const IconActivity = (p: IconProps) => (
   <Svg {...p}>
     <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
@@ -319,21 +297,6 @@ export const IconEdit = (p: IconProps) => (
   <Svg {...p}>
     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
     <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z" />
-  </Svg>
-)
-
-export const IconGitBranch = (p: IconProps) => (
-  <Svg {...p}>
-    <line x1="6" y1="3" x2="6" y2="15" />
-    <circle cx="18" cy="6" r="3" />
-    <circle cx="6" cy="18" r="3" />
-    <path d="M18 9a9 9 0 0 1-9 9" />
-  </Svg>
-)
-
-export const IconZap = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8Z" />
   </Svg>
 )
 

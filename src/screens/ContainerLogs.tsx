@@ -11,9 +11,9 @@ export function ContainerLogsScreen({ id }: { id: string }) {
   const logs = useApp((s) => s.logs)
   const loadLogs = useApp((s) => s.loadLogs)
   const toast = useApp((s) => s.toast)
+  const loading = useApp((s) => s.logsLoading)
   const [following, setFollowing] = useState(true)
   const endRef = useRef<HTMLDivElement>(null)
-  const loading = logs.length === 0
 
   useEffect(() => {
     void loadLogs(id, LOG_TAIL)

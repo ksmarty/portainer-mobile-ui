@@ -12,7 +12,7 @@ import {
   IconUsers,
   IconWifi,
 } from '../components/Icons'
-import { Ring, ListItem, SectionTitle, Skeleton } from '../components/ui'
+import { Ring, ListItem, SectionTitle, Skeleton, useAnimatedNumber } from '../components/ui'
 
 export function HomeScreen() {
   const dashboard = useApp((s) => s.dashboard)
@@ -20,6 +20,7 @@ export function HomeScreen() {
   const navigate = useApp((s) => s.navigate)
   const demo = useApp((s) => s.demo)
   const refreshDashboard = useApp((s) => s.refreshDashboard)
+  const animatedMemUsed = useAnimatedNumber(dashboard?.memoryUsed ?? 0)
 
   // Live CPU/memory: refresh the aggregates while the dashboard is visible.
   useEffect(() => {
@@ -43,7 +44,7 @@ export function HomeScreen() {
     )
   }
 
-  const usedGb = dashboard.memoryUsed ? (dashboard.memoryUsed / 1073741824).toFixed(1) : '0'
+  const usedGb = dashboard?.memoryUsed ? (animatedMemUsed / 1073741824).toFixed(1) : '0'
   const totalGb = dashboard.memoryTotal ? (dashboard.memoryTotal / 1073741824).toFixed(0) : '16'
 
   return (

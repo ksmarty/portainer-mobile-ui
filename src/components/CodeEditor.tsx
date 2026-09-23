@@ -51,9 +51,9 @@ function measureCaret(container: HTMLDivElement, ta: HTMLTextAreaElement, pos: n
     left: '0',
     visibility: 'hidden',
     pointerEvents: 'none',
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
-    overflowWrap: 'break-word',
+    // Must match the textarea exactly (`white-space: pre`, no wrapping): if the
+    // mirror wrapped long lines the caret's line offset would be wrong.
+    whiteSpace: 'pre',
     tabSize: '2',
     fontFamily: cs.fontFamily,
     fontSize: cs.fontSize,

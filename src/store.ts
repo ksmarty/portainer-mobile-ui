@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import {
-  apiLogin,
   clearConfig,
   clearCache,
   containerAction,
@@ -79,6 +78,10 @@ interface AppState {
   screen: Screen
   history: Screen[]
   sidebarOpen: boolean
+  // When set, navigation is intercepted: call the guard with a `proceed`
+  // callback; return true to allow the navigation, false to block it (the
+  // guard is expected to prompt the user and call `proceed` on confirm).
+  navGuard: ((proceed: () => void) => boolean) | null
   endpoints: Endpoint[]
   containers: Container[]
   images: Image[]
@@ -94,17 +97,18 @@ interface AppState {
   error: string | null
   toasts: Toast[]
   logs: LogLine[]
+  logsLoading: boolean
   stats: Stats | null
   statsTimer: number | null
 
   boot: () => Promise<void>
-  login: (username: string, password: string) => Promise<void>
   connect: (url: string, token: string, isJwt: boolean) => Promise<void>
   logout: () => void
   toggleDemo: () => void
   selectEndpoint: (id: number) => void
   navigate: (screen: Screen) => void
   back: () => void
+  setNavGuard: (fn: ((proceed: () => void) => boolean) | null) => void
   refresh: () => Promise<void>
   toast: (message: string, kind?: Toast['kind']) => void
   dismissToast: (id: string) => void
@@ -149,6 +153,7 @@ export const useApp = create<AppState>((set, get) => ({
   screen: HOME,
   history: [],
   sidebarOpen: false,
+  navGuard: null,
   endpoints: [],
   containers: [],
   images: [],
@@ -164,6 +169,7 @@ export const useApp = create<AppState>((set, get) => ({
   error: null,
   toasts: [],
   logs: [],
+  logsLoading: false,
   stats: null,
   statsTimer: null,
 
@@ -219,9 +225,10 @@ export const useApp = create<AppState>((set, get) => ({
               getNetworks(active),
               getStacks(),
               getSettings(),
-              getUsers(),
-              getTeams(),
-              getRegistries(),
+              // Admin-only endpoints — don't fail the whole boot for a non-admin key.
+              getUsers().catch(() => [] as User[]),
+              getTeams().catch(() => [] as Team[]),
+              getRegistries().catch(() => [] as Registry[]),
               getDashboard(),
             ])
           set({
@@ -252,20 +259,6 @@ export const useApp = create<AppState>((set, get) => ({
       const demo = get().demo
       set({ demo, ready: true, booting: false })
       get().toast('Failed to load: ' + (e as Error).message, 'error')
-    }
-  },
-
-  login: async (username, password) => {
-    set({ loading: true, error: null })
-    try {
-      const res = await apiLogin(username, password)
-      const cfg = getConfig()
-      setConfig({ ...cfg, token: res.jwt, isJwt: true })
-      set({ user: res.user, loading: false })
-      await get().refresh()
-    } catch (e) {
-      set({ loading: false, error: (e as Error).message })
-      throw e
     }
   },
 
@@ -309,7 +302,25 @@ export const useApp = create<AppState>((set, get) => ({
   logout: () => {
     clearConfig()
     clearCache()
-    set({ ready: true, user: null, endpoints: [], containers: [], images: [], volumes: [], networks: [], stacks: [], screen: HOME, history: [] })
+    set({
+      ready: true,
+      user: null,
+      activeEndpoint: 0,
+      endpoints: [],
+      containers: [],
+      images: [],
+      volumes: [],
+      networks: [],
+      stacks: [],
+      users: [],
+      teams: [],
+      registries: [],
+      settings: null,
+      dashboard: null,
+      screen: HOME,
+      history: [],
+      navGuard: null,
+    })
   },
 
   toggleDemo: () => {
@@ -359,18 +370,30 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   navigate: (screen) => {
-    set((s) => ({ screen, history: [...s.history.slice(-24), s.screen], sidebarOpen: false }))
-    window.scrollTo(0, 0)
+    const go = () => {
+      set((s) => ({ screen, history: [...s.history.slice(-24), s.screen], sidebarOpen: false }))
+      window.scrollTo(0, 0)
+    }
+    const guard = get().navGuard
+    if (guard && !guard(go)) return
+    go()
   },
 
   back: () => {
-    set((s) => {
-      const history = [...s.history]
-      const prev = history.pop() || HOME
-      return { screen: prev, history }
-    })
-    window.scrollTo(0, 0)
+    const go = () => {
+      set((s) => {
+        const history = [...s.history]
+        const prev = history.pop() || HOME
+        return { screen: prev, history }
+      })
+      window.scrollTo(0, 0)
+    }
+    const guard = get().navGuard
+    if (guard && !guard(go)) return
+    go()
   },
+
+  setNavGuard: (fn) => set({ navGuard: fn }),
 
   refresh: async () => {
     set({ loading: true, error: null })
@@ -379,16 +402,20 @@ export const useApp = create<AppState>((set, get) => ({
       // serving the short-lived read cache, so UI reflects what just changed.
       clearCache()
       const id = endpointId(get())
-      const [endpoints, containers, images, volumes, networks, stacks, settings] = await Promise.all([
-        getEndpoints(),
-        getContainers(id),
-        getImages(id),
-        getVolumes(id),
-        getNetworks(id),
-        getStacks(),
-        getSettings(),
-      ])
-      set({ endpoints, containers, images, volumes, networks, stacks, settings, loading: false })
+      const [endpoints, containers, images, volumes, networks, stacks, settings, users, teams, registries] =
+        await Promise.all([
+          getEndpoints(),
+          getContainers(id),
+          getImages(id),
+          getVolumes(id),
+          getNetworks(id),
+          getStacks(),
+          getSettings(),
+          getUsers().catch(() => [] as User[]),
+          getTeams().catch(() => [] as Team[]),
+          getRegistries().catch(() => [] as Registry[]),
+        ])
+      set({ endpoints, containers, images, volumes, networks, stacks, settings, users, teams, registries, loading: false })
       // The dashboard aggregates live CPU/memory by sampling container stats
       // ~1.5s apart. Never make lists/actions wait on it — load it in the
       // background and fill it in when it arrives.
@@ -448,7 +475,7 @@ export const useApp = create<AppState>((set, get) => ({
   doCreateContainer: async (name, image) => {
     const ep = endpointId(get())
     try {
-      await createContainer(ep, { Name: name, Image: image })
+      await createContainer(ep, name, image)
       get().toast('Container created', 'success')
       await get().refresh()
     } catch (e) {
@@ -514,7 +541,7 @@ export const useApp = create<AppState>((set, get) => ({
 
   doDeployStack: async (name, file, env = []) => {
     try {
-      await deployStack(name, file, env)
+      await deployStack(endpointId(get()), name, file, env)
       get().toast('Stack deployed', 'success')
       await get().refresh()
     } catch (e) {
@@ -538,7 +565,7 @@ export const useApp = create<AppState>((set, get) => ({
 
   doRemoveStack: async (id) => {
     try {
-      await removeStack(id)
+      await removeStack(id, get().stacks.find((s) => s.Id === id)?.EndpointId)
       get().toast('Stack removed', 'success')
       await get().refresh()
     } catch (e) {
@@ -548,7 +575,7 @@ export const useApp = create<AppState>((set, get) => ({
 
   doStackAction: async (id, action) => {
     try {
-      await stackAction(id, action)
+      await stackAction(id, action, get().stacks.find((s) => s.Id === id)?.EndpointId)
       get().toast(`Stack ${action === 'start' ? 'started' : 'stopped'}`, 'success')
       await get().refresh()
     } catch (e) {
@@ -584,11 +611,12 @@ export const useApp = create<AppState>((set, get) => ({
 
   loadLogs: async (id, tail = 120) => {
     const ep = endpointId(get())
-    set({ logs: [] })
+    set({ logs: [], logsLoading: true })
     try {
       const logs = await getContainerLogs(ep, id, tail)
-      set({ logs })
+      set({ logs, logsLoading: false })
     } catch (e) {
+      set({ logsLoading: false })
       get().toast((e as Error).message, 'error')
     }
   },
@@ -644,6 +672,7 @@ export const useApp = create<AppState>((set, get) => ({
   doAddUser: async (username, password, role) => {
     if (get().demo) {
       demoAddUser(username, role)
+      await get().refresh()
       get().toast('User created', 'success')
       return
     }
@@ -675,6 +704,7 @@ export const useApp = create<AppState>((set, get) => ({
   doAddTeam: async (name) => {
     if (get().demo) {
       demoAddTeam(name)
+      await get().refresh()
       get().toast('Team created', 'success')
       return
     }
@@ -690,6 +720,7 @@ export const useApp = create<AppState>((set, get) => ({
   doRemoveTeam: async (id) => {
     if (get().demo) {
       demoRemoveTeam(id)
+      await get().refresh()
       get().toast('Team removed', 'success')
       return
     }
@@ -703,6 +734,3 @@ export const useApp = create<AppState>((set, get) => ({
   },
 }))
 
-export function isAdmin(state: AppState): boolean {
-  return state.demo || (state.user?.Role ?? 1) === 1
-}

@@ -23,7 +23,6 @@ import { RegistriesScreen } from './screens/Registries'
 import { SettingsScreen } from './screens/Settings'
 import { SchemaSettingsScreen } from './screens/SchemaSettings'
 import { ConnectScreen } from './screens/Connect'
-import { LoginScreen } from './screens/Login'
 import { LoadingScreen } from './screens/Loading'
 
 export default function App() {
@@ -80,7 +79,7 @@ export default function App() {
   if (!ready || booting) return <LoadingScreen />
 
   const authed = demo || !!user || endpoints.length > 0
-  const showTopBar = authed && screen.name !== 'login'
+  const showTopBar = authed
 
   return (
     <div className="app-shell">
@@ -151,8 +150,6 @@ function Router() {
       return <SchemaSettingsScreen />
     case 'connect':
       return <ConnectScreen />
-    case 'login':
-      return <LoginScreen />
     default:
       return <HomeScreen />
   }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '../store'
 import { IconArrowRight, IconCheck, IconCopy, IconPlus, IconStack, IconTrash } from '../components/Icons'
 import { CodeEditor, type CodeEditorHandle } from '../components/CodeEditor'
+import { ConfirmModal } from '../components/ConfirmModal'
 import { Spinner } from '../components/ui'
 import { dockerRunToCompose, isValidDockerRun } from '../lib/composerize'
 import { formatCompose, mergeCompose, normalizeCompose } from '../lib/compose'
@@ -43,9 +44,14 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
   const doUpdateStack = useApp((s) => s.doUpdateStack)
   const back = useApp((s) => s.back)
   const toast = useApp((s) => s.toast)
+  const setNavGuard = useApp((s) => s.setNavGuard)
 
   const existing = useMemo(() => stacks.find((s) => s.Id === stackId), [stacks, stackId])
   const isEdit = !!stackId
+  const initialEnv = useMemo<EnvRow[]>(
+    () => (existing?.Env ? existing.Env.map((e) => ({ key: e.name, value: e.value })) : []),
+    [existing],
+  )
 
   const [name, setName] = useState(existing?.Name || '')
   const [mode, setMode] = useState<'compose' | 'env' | 'run'>('compose')
@@ -54,16 +60,22 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
   const [compose, setCompose] = useState(existing?.File ?? (isEdit ? '' : SAMPLE_COMPOSE))
   const [composeTouched, setComposeTouched] = useState(false)
   const [run, setRun] = useState(SAMPLE_RUN)
-  const [envRows, setEnvRows] = useState<EnvRow[]>(() =>
-    existing?.Env ? existing.Env.map((e) => ({ key: e.name, value: e.value })) : [],
-  )
+  const [envRows, setEnvRows] = useState<EnvRow[]>(initialEnv)
   const [busy, setBusy] = useState(false)
   const [loadingFile, setLoadingFile] = useState(isEdit && !existing?.File)
   const [loadError, setLoadError] = useState('')
   const [notes, setNotes] = useState<{ error?: string; warnings: string[] }>({ warnings: [] })
   const [envRaw, setEnvRaw] = useState(false)
   const [envFocus, setEnvFocus] = useState<number | null>(null)
+  const [confirmLeave, setConfirmLeave] = useState(false)
   const editorRef = useRef<CodeEditorHandle>(null)
+  const proceedRef = useRef<null | (() => void)>(null)
+  // Snapshot of the loaded values, used to detect unsaved changes.
+  const [baseline, setBaseline] = useState(() => ({
+    name: existing?.Name || '',
+    compose: existing?.File ?? (isEdit ? '' : SAMPLE_COMPOSE),
+    env: JSON.stringify(initialEnv),
+  }))
 
   const loadFile = useMemo(
     () => async () => {
@@ -71,7 +83,9 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
       setLoadingFile(true)
       setLoadError('')
       try {
-        setCompose(await getStackFile(stackId))
+        const f = await getStackFile(stackId)
+        setCompose(f)
+        setBaseline((b) => ({ ...b, compose: f }))
       } catch (e) {
         setLoadError((e as Error).message)
       } finally {
@@ -86,13 +100,32 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
   useEffect(() => {
     if (!stackId) return
     if (existing?.File) {
-      setCompose(existing.File)
+      const f = existing.File
+      setCompose(f)
+      setBaseline((b) => ({ ...b, compose: f }))
       setLoadingFile(false)
       setLoadError('')
       return
     }
     void loadFile()
   }, [stackId, existing?.File, loadFile])
+
+  const dirty =
+    name !== baseline.name || compose !== baseline.compose || JSON.stringify(envRows) !== baseline.env
+
+  // Warn before leaving with unsaved edits (back button, swipe, or a tab tap).
+  useEffect(() => {
+    if (!dirty) {
+      setNavGuard(null)
+      return
+    }
+    setNavGuard((proceed) => {
+      proceedRef.current = proceed
+      setConfirmLeave(true)
+      return false
+    })
+    return () => setNavGuard(null)
+  }, [dirty, setNavGuard])
 
   const convert = () => {
     if (!isValidDockerRun(run)) {
@@ -151,6 +184,7 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
       } else {
         await doDeployStack(sanitizeName(name), compose, env)
       }
+      setNavGuard(null)
       back()
     } catch {
       /* handled by store */
@@ -409,6 +443,22 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
           {busy ? <Spinner size={17} /> : existing ? <IconCheck size={17} /> : <IconStack size={17} />}
           {busy ? (existing ? 'Updating…' : 'Deploying…') : existing ? 'Update' : 'Deploy stack'}
         </button>
+      )}
+
+      {confirmLeave && (
+        <ConfirmModal
+          title="Discard changes?"
+          body="You have unsaved changes to this stack. Leave without saving?"
+          confirmLabel="Discard"
+          onCancel={() => setConfirmLeave(false)}
+          onConfirm={() => {
+            setConfirmLeave(false)
+            setNavGuard(null)
+            const proceed = proceedRef.current
+            proceedRef.current = null
+            proceed?.()
+          }}
+        />
       )}
     </div>
   )

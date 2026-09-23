@@ -1,5 +1,35 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { IconChevronRight } from './Icons'
+
+/**
+ * Ease a number from its previous value to the new one over `duration` ms so
+ * gauges/readouts glide instead of jumping when a poll returns.
+ */
+export function useAnimatedNumber(value: number, duration = 650): number {
+  const [display, setDisplay] = useState(value)
+  const displayRef = useRef(value)
+  useEffect(() => {
+    const from = displayRef.current
+    if (from === value) return
+    let raf = 0
+    const start = performance.now()
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / duration)
+      const eased = 1 - Math.pow(1 - t, 3)
+      const next = from + (value - from) * eased
+      displayRef.current = next
+      setDisplay(next)
+      if (t < 1) raf = requestAnimationFrame(tick)
+      else {
+        displayRef.current = value
+        setDisplay(value)
+      }
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [value, duration])
+  return display
+}
 
 export function Skeleton({ h = 60, r = 16, style }: { h?: number; r?: number; style?: React.CSSProperties }) {
   return <div className="skeleton" style={{ height: h, borderRadius: r, ...style }} />
@@ -93,10 +123,6 @@ export function Pill({ color, children, dot = true }: { color: string; children:
   )
 }
 
-export function Tag({ children }: { children: ReactNode }) {
-  return <span className="tag">{children}</span>
-}
-
 export function Ring({
   value,
   size = 88,
@@ -113,6 +139,7 @@ export function Ring({
   const r = (size - stroke) / 2
   const c = 2 * Math.PI * r
   const pct = Math.min(100, Math.max(0, value))
+  const shown = useAnimatedNumber(pct)
   return (
     <div className="ring" style={{ width: size, height: size }}>
       <svg width={size} height={size}>
@@ -125,11 +152,11 @@ export function Ring({
           strokeWidth={stroke}
           fill="none"
           strokeDasharray={c}
-          strokeDashoffset={c - (c * pct) / 100}
+          strokeDashoffset={c - (c * shown) / 100}
           strokeLinecap="round"
         />
       </svg>
-      <div className="pct">{label ?? `${Math.round(pct)}%`}</div>
+      <div className="pct">{label ?? `${Math.round(shown)}%`}</div>
     </div>
   )
 }

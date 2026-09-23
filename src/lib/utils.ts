@@ -58,30 +58,9 @@ export function timeAgo(unixSeconds: number): string {
   return `${Math.floor(mo / 12)}y ago`
 }
 
-export function shortId(id: string, len = 12): string {  const clean = id.replace(/^sha256:/, '')
+export function shortId(id: string, len = 12): string {
+  const clean = id.replace(/^sha256:/, '')
   return clean.length > len ? clean.slice(0, len) + '…' : clean
-}
-
-// Splits an image reference into repo and tag for the /images/create API.
-// Digest refs (repo@sha256:...) are returned whole with an empty tag.
-export function parseImageRef(ref: string): { from: string; tag: string } {
-  const r = ref.trim()
-  if (!r) return { from: r, tag: 'latest' }
-  if (r.includes('@')) return { from: r.toLowerCase(), tag: '' }
-  const slash = r.lastIndexOf('/')
-  const colon = r.lastIndexOf(':')
-  if (colon > slash) return { from: r.slice(0, colon).toLowerCase(), tag: r.slice(colon + 1) }
-  return { from: r.toLowerCase(), tag: 'latest' }
-}
-
-export function formatDate(unixSeconds: number): string {
-  return new Date(unixSeconds * 1000).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
 }
 
 export function stateColor(state: string): string {
@@ -114,17 +93,6 @@ export function portLabel(ports: { PublicPort?: number; PrivatePort: number; IP?
   return mapped.map((p) => `${p.PublicPort}→${p.PrivatePort}/${p.Type}`).join(', ')
 }
 
-export function imageTag(image: string): string {
-  if (image.includes('@')) return image.split('@')[1].slice(0, 18) + '…'
-  const last = image.lastIndexOf(':')
-  if (last === -1 || last < image.lastIndexOf('/')) return image + ':latest'
-  return image
-}
-
-export function titleCase(s: string): string {
-  return s.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-}
-
 export function endpointTypeName(type: number): string {
   const map: Record<number, string> = {
     1: 'Docker',
@@ -146,10 +114,6 @@ export function roleName(role: number): string {
 export function registryTypeName(type: number): string {
   const map: Record<number, string> = { 1: 'Docker Hub', 2: 'Quay', 3: 'GitHub', 4: 'Custom', 5: 'ProGet', 6: 'Azure' }
   return map[type] || 'Custom'
-}
-
-export function shortName(name: string): string {
-  return name.replace(/^\//, '')
 }
 
 export function sanitizeName(s: string): string {

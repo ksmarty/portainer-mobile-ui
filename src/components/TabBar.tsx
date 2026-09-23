@@ -46,7 +46,10 @@ export function TabBar() {
             <button
               key={t.name}
               className={`tab ${active === t.name ? 'active' : ''}`}
-              onClick={() => navigate({ name: t.name, title: t.title })}
+              onClick={() => {
+                // Don't push duplicate history when already on this tab's root.
+                if (screen.name !== t.name) navigate({ name: t.name, title: t.title })
+              }}
             >
               <Icon size={22} strokeWidth={active === t.name ? 2.1 : 1.8} />
               <span>{t.label}</span>

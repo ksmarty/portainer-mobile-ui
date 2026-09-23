@@ -133,7 +133,9 @@ a {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding-bottom: calc(18px + var(--safe-bottom));
+  /* The bottom nav already clears the home indicator, so don't add the whole
+     safe-area inset again — it just leaves a big gap under the action button. */
+  padding-bottom: 10px;
 }
 
 /* Compose tab: the editor stretches to fill the space between the mode tabs

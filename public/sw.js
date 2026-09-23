@@ -23,6 +23,8 @@ self.addEventListener('fetch', (e) => {
   if (url.origin !== self.location.origin) return;
   // Never cache /api (or the dev preview proxy).
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/preview/')) return;
+  // Build metadata must always be fresh.
+  if (url.pathname === '/version.json') return;
 
   // Navigations: network-first, fall back to the cached shell when offline.
   if (req.mode === 'navigate') {
@@ -50,7 +52,7 @@ self.addEventListener('fetch', (e) => {
           }
           return res;
         })
-        .catch(() => cached);
+        .catch(() => cached || Response.error());
       return cached || refresh;
     }),
   );
