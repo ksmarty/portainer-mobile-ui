@@ -7,7 +7,6 @@ import {
   demoGet,
   demoGetImageInfo,
   demoGetNetworkInfo,
-  demoPruneImages,
   demoPullImage,
   demoRemoveContainer,
   demoRemoveImage,
@@ -462,16 +461,6 @@ export function getDanglingImages(endpointId: number): Promise<Image[]> {
     all: 1,
     filters: JSON.stringify({ dangling: ['true'] }),
   })
-}
-
-export function pruneImages(endpointId: number): Promise<{ deleted: number; reclaimed: number }> {
-  if (isDemo()) return demoDelay(demoPruneImages(), 400)
-  return portainerFetch<any>(dockerPath(endpointId, '/images/prune'), { method: 'POST' }, {
-    filters: JSON.stringify({ dangling: ['true'] }),
-  }).then((d) => ({
-    deleted: d?.ImagesDeleted?.length ?? 0,
-    reclaimed: d?.SpaceReclaimed ?? 0,
-  }))
 }
 
 export function removeImage(endpointId: number, id: string, force = false): Promise<void> {

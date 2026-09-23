@@ -4,7 +4,7 @@ import { useApp } from '../store'
 import { IconBroom, IconImage, IconPlus, IconSearch, IconTrash } from '../components/Icons'
 import { Empty, ListItem, Skeleton, Spinner } from '../components/ui'
 import { bytes, shortId, timeAgo } from '../lib/utils'
-import { getDanglingImages } from '../lib/api'
+import { getDanglingImages, removeImage } from '../lib/api'
 import type { Image as ImageT } from '../lib/types'
 import { ConfirmModal } from '../components/ConfirmModal'
 
@@ -125,10 +125,11 @@ function PullSheet({ onClose, onPull }: { onClose: () => void; onPull: (img: str
 
 function CleanupSheet({ onClose }: { onClose: () => void }) {
   const activeEndpoint = useApp((s) => s.activeEndpoint)
-  const doPruneImages = useApp((s) => s.doPruneImages)
+  const refresh = useApp((s) => s.refresh)
+  const toast = useApp((s) => s.toast)
   const [dangling, setDangling] = useState<ImageT[] | null>(null)
-  const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [progress, setProgress] = useState<{ done: number; total: number; reclaimed: number } | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -146,18 +147,40 @@ function CleanupSheet({ onClose }: { onClose: () => void }) {
 
   const total = dangling?.reduce((s, i) => s + (i.Size || 0), 0) ?? 0
 
+  // Remove images one at a time instead of a single prune request: the prune
+  // call can run past the request timeout on a busy host, and per-image deletes
+  // give us real progress to show.
   const prune = async () => {
-    setBusy(true)
-    try {
-      await doPruneImages()
-      onClose()
-    } finally {
-      setBusy(false)
+    if (!dangling?.length) return
+    const list = dangling
+    let done = 0
+    let reclaimed = 0
+    let failed = 0
+    setProgress({ done: 0, total: list.length, reclaimed: 0 })
+    for (const img of list) {
+      try {
+        await removeImage(activeEndpoint, img.Id, true)
+        reclaimed += img.Size || 0
+      } catch {
+        failed++
+      }
+      done++
+      setProgress({ done, total: list.length, reclaimed })
     }
+    await refresh()
+    if (failed === 0) {
+      toast(`Freed ${bytes(reclaimed)} (${done} image${done === 1 ? '' : 's'})`, 'success')
+    } else {
+      toast(`Removed ${done - failed} of ${list.length} images`, 'error')
+    }
+    onClose()
   }
 
+  const busy = progress !== null
+  const pct = progress ? Math.round((progress.done / progress.total) * 100) : 0
+
   return (
-    <div className="overlay" onClick={onClose}>
+    <div className="overlay" onClick={busy ? undefined : onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <div className="sheet-handle" />
         <div className="sheet-title">Clean up images</div>
@@ -197,18 +220,35 @@ function CleanupSheet({ onClose }: { onClose: () => void }) {
 
             <div className="card" style={{ marginTop: 10, background: 'var(--green-soft)', borderColor: 'var(--green)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--green)' }}>Storage to be freed</span>
-                <span style={{ fontSize: 17, fontWeight: 800, color: 'var(--green)' }}>{bytes(total)}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--green)' }}>
+                  {progress ? 'Freed so far' : 'Storage to be freed'}
+                </span>
+                <span style={{ fontSize: 17, fontWeight: 800, color: 'var(--green)' }}>
+                  {bytes(progress ? progress.reclaimed : total)}
+                </span>
               </div>
               <div style={{ fontSize: 11.5, color: 'var(--text-dim)', marginTop: 3 }}>
-                {dangling.length} dangling image{dangling.length === 1 ? '' : 's'}
+                {progress
+                  ? `${progress.done} of ${progress.total} images removed`
+                  : `${dangling.length} dangling image${dangling.length === 1 ? '' : 's'}`}
               </div>
             </div>
 
-            <button className="btn danger full" style={{ marginTop: 10 }} onClick={prune} disabled={busy}>
-              {busy ? <Spinner size={16} /> : <IconBroom size={16} />}
-              {busy ? 'Cleaning…' : `Clean up ${dangling.length} image${dangling.length === 1 ? '' : 's'}`}
-            </button>
+            {progress ? (
+              <div style={{ marginTop: 12 }}>
+                <div className="bar">
+                  <div style={{ width: `${pct}%` }} />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-dim)', marginTop: 6 }}>
+                  <span>Removing images…</span>
+                  <span>{pct}%</span>
+                </div>
+              </div>
+            ) : (
+              <button className="btn danger full" style={{ marginTop: 10 }} onClick={prune}>
+                <IconBroom size={16} /> Clean up {dangling.length} image{dangling.length === 1 ? '' : 's'}
+              </button>
+            )}
           </>
         )}
       </div>

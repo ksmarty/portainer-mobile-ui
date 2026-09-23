@@ -595,14 +595,6 @@ export function demoDanglingImages(): Image[] {
   return demoState.images.filter((i) => !i.RepoTags || i.RepoTags.length === 0 || i.RepoTags.includes('<none>:<none>'))
 }
 
-export function demoPruneImages(): { deleted: number; reclaimed: number } {
-  const dangling = demoDanglingImages()
-  const reclaimed = dangling.reduce((s, i) => s + (i.Size || 0), 0)
-  const ids = new Set(dangling.map((i) => i.Id))
-  demoState.images = demoState.images.filter((i) => !ids.has(i.Id))
-  return { deleted: dangling.length, reclaimed }
-}
-
 export function demoRecreateContainer(id: string) {
   const c = demoState.containers.find((x) => x.Id === id)
   if (!c) return

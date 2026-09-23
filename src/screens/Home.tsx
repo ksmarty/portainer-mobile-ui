@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useApp } from '../store'
 import {
   IconBox,
@@ -18,6 +19,14 @@ export function HomeScreen() {
   const endpoints = useApp((s) => s.endpoints)
   const navigate = useApp((s) => s.navigate)
   const demo = useApp((s) => s.demo)
+  const refreshDashboard = useApp((s) => s.refreshDashboard)
+
+  // Live CPU/memory: refresh the aggregates while the dashboard is visible.
+  useEffect(() => {
+    void refreshDashboard()
+    const timer = window.setInterval(() => void refreshDashboard(), 5000)
+    return () => window.clearInterval(timer)
+  }, [refreshDashboard])
 
   if (!dashboard) {
     return (

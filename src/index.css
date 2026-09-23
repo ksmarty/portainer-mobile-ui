@@ -115,6 +115,8 @@ a {
   overflow-x: hidden;
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
+  /* Containing block for the full-height stack editor. */
+  position: relative;
 }
 
 .page {
@@ -122,13 +124,14 @@ a {
   animation: fade 0.18s ease;
 }
 
-/* Stack editor: pin the page to the viewport so the code editor fills the
-   remaining space instead of scrolling the whole page. */
+/* Stack editor: pin the page to the scroll viewport so the code editor fills
+   the remaining space. Absolute inset (not height:100%) because percentage
+   heights are unreliable inside a scroll container on iOS. */
 .page-editor {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-height: 0;
   overflow: hidden;
   padding-bottom: calc(18px + var(--safe-bottom));
 }
@@ -596,7 +599,7 @@ a {
   -webkit-backdrop-filter: blur(18px);
   border-top: 1px solid var(--border-soft);
   /* Sit closer to the bottom edge than the raw home-indicator inset. */
-  padding-bottom: max(0px, calc(var(--safe-bottom) - 12px));
+  padding-bottom: max(0px, calc(var(--safe-bottom) - 22px));
   /* Prevent iOS rubber-band scrolling when touching the bottom nav */
   touch-action: none;
 }

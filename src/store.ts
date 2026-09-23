@@ -25,7 +25,6 @@ import {
   getUsers,
   getVolumes,
   isDemo,
-  pruneImages,
   pullImage,
   removeContainer,
   removeImage,
@@ -57,7 +56,7 @@ import type {
   User,
   Volume,
 } from './lib/types'
-import { bytes, uid } from './lib/utils'
+import { uid } from './lib/utils'
 
 export interface Screen {
   name: string
@@ -116,7 +115,7 @@ interface AppState {
   doCreateContainer: (name: string, image: string) => Promise<void>
   doPullImage: (image: string) => Promise<void>
   doRemoveImage: (id: string) => Promise<void>
-  doPruneImages: () => Promise<void>
+  refreshDashboard: () => Promise<void>
   doRemoveVolume: (name: string) => Promise<void>
   doRemoveNetwork: (id: string) => Promise<void>
   doDeployStack: (name: string, file: string, env?: { name: string; value: string }[]) => Promise<void>
@@ -481,18 +480,13 @@ export const useApp = create<AppState>((set, get) => ({
     }
   },
 
-  doPruneImages: async () => {
-    const ep = endpointId(get())
+  // Refresh just the dashboard aggregates (CPU/memory) without touching the
+  // rest of the store — used to poll live usage on the home screen.
+  refreshDashboard: async () => {
     try {
-      const res = await pruneImages(ep)
-      if (res.deleted === 0) {
-        get().toast('Nothing to clean up', 'info')
-      } else {
-        get().toast(`Freed ${bytes(res.reclaimed)} (${res.deleted} image${res.deleted === 1 ? '' : 's'})`, 'success')
-      }
-      await get().refresh()
-    } catch (e) {
-      get().toast((e as Error).message, 'error')
+      set({ dashboard: await getDashboard() })
+    } catch {
+      /* keep the last known values */
     }
   },
 

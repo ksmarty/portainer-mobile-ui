@@ -70,6 +70,7 @@ export function StackDetailScreen({ id, fileOverride }: { id: number; fileOverri
   if (!stack && !fileOverride) return null
 
   const file = fileOverride ?? null
+  const staleCount = stackContainers.filter((c) => imageState(c, images) === 'stale').length
 
   const pullLatestImages = async () => {
     setPulling(true)
@@ -135,7 +136,14 @@ export function StackDetailScreen({ id, fileOverride }: { id: number; fileOverri
 
       {stack && (
         <>
-          <SectionTitle>Containers</SectionTitle>
+          <SectionTitle>
+            Containers
+            {staleCount > 0 && (
+              <span className="pill" style={{ color: 'var(--amber)', background: 'var(--amber-soft)', marginLeft: 7 }}>
+                {staleCount} outdated
+              </span>
+            )}
+          </SectionTitle>
           <div className="card-list">
             {stackContainers.map((c) => (
               <StackContainerRow
@@ -264,8 +272,7 @@ function StackContainerRow({ c, imgState, onClick }: { c: Container; imgState: I
           <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {c.Names[0]?.replace('/', '')}
           </span>
-          {imgState === 'stale' && <Pill color="var(--amber)">update</Pill>}
-          {imgState === 'current' && <Pill color="var(--green)">current</Pill>}
+          {imgState === 'stale' && <Pill color="var(--amber)">update available</Pill>}
         </div>
         <div className="item-sub">
           <span className="mono">{c.Image}</span>

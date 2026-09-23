@@ -124,11 +124,9 @@ export const CodeEditor = forwardRef<CodeEditorHandle, {
 
   useEffect(() => setActive(0), [filtered])
 
-  useEffect(() => {
-    if (!open) {
-      setPos(null)
-      return
-    }
+  // Position the popup under (or above) the caret. measureCaret already
+  // accounts for the textarea's own scroll, so don't subtract it again.
+  const place = () => {
     const wrap = wrapRef.current
     const ta = taRef.current
     if (!wrap || !ta) return
@@ -142,14 +140,31 @@ export const CodeEditor = forwardRef<CodeEditorHandle, {
     const estH = Math.min(216, filtered.length * 30 + 10)
     const width = Math.min(300, window.innerWidth - 24)
 
-    let top = wrapRect.top + rel.top - (ta.scrollTop || 0) + lineHeight + 4
-    const left = Math.max(8, Math.min(wrapRect.left + rel.left - (ta.scrollLeft || 0), window.innerWidth - width - 8))
+    let top = wrapRect.top + rel.top + lineHeight + 4
+    const left = Math.max(8, Math.min(wrapRect.left + rel.left, window.innerWidth - width - 8))
 
     if (top + estH > window.innerHeight - 10) {
-      top = wrapRect.top + rel.top - (ta.scrollTop || 0) - estH - 4
-      top = Math.max(8, top)
+      top = Math.max(8, wrapRect.top + rel.top - estH - 4)
     }
     setPos({ top, left, width })
+  }
+
+  useEffect(() => {
+    if (!open) {
+      setPos(null)
+      return
+    }
+    place()
+    // Keep the popup glued to the caret when the editor or any ancestor
+    // scrolls (capture phase catches non-bubbling scroll events) or resizes.
+    const onMove = () => place()
+    window.addEventListener('scroll', onMove, true)
+    window.addEventListener('resize', onMove)
+    return () => {
+      window.removeEventListener('scroll', onMove, true)
+      window.removeEventListener('resize', onMove)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, caret, filtered.length, value])
 
   const syncScroll = () => {
