@@ -13,7 +13,7 @@ import {
   IconTerminal,
   IconTrash,
 } from '../components/Icons'
-import { KV, ListItem, Pill, SectionTitle, Spinner, Tag } from '../components/ui'
+import { KV, ListItem, Pill, SectionTitle, Spinner } from '../components/ui'
 import { bytes, shortId, stateColor, stateLabel, timeAgo } from '../lib/utils'
 import { getImageInfo } from '../lib/api'
 import type { ImageInfo } from '../lib/types'
@@ -135,9 +135,12 @@ export function ContainerDetailScreen({ id }: { id: string }) {
       {!!c.Labels && Object.keys(c.Labels).length > 0 && (
         <>
           <SectionTitle>Labels</SectionTitle>
-          <div className="card" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          <div className="card">
             {Object.entries(c.Labels).map(([k, v]) => (
-              <Tag key={k}>{k}={v}</Tag>
+              <div key={k} className="label-row">
+                <div className="label-key mono">{k}</div>
+                <div className="label-value mono">{v || '—'}</div>
+              </div>
             ))}
           </div>
         </>
@@ -146,13 +149,13 @@ export function ContainerDetailScreen({ id }: { id: string }) {
       <SectionTitle>Networks</SectionTitle>
       <div className="card">
         <KV k="Mode" v={c.NetworkMode || '—'} />
-        {c.IPs?.length ? <KV k="IP address" v={c.IPs.join(', ')} mono /> : null}
         {!c.Networks?.length && <KV k="Attached" v="none" />}
       </div>
       {!!c.Networks?.length && (
         <div className="card-list" style={{ marginTop: 6 }}>
-          {c.Networks.map((name) => {
+          {c.Networks.map((name, i) => {
             const net = networks.find((n) => n.Name === name)
+            const ip = c.IPs?.[i]
             return (
               <ListItem
                 key={name}
@@ -162,7 +165,7 @@ export function ContainerDetailScreen({ id }: { id: string }) {
                   </div>
                 }
                 title={name}
-                sub={net ? `${net.Driver}${net.Internal ? ' · internal' : ''}` : 'network'}
+                sub={[ip, net?.Driver, net?.Internal ? 'internal' : undefined].filter(Boolean).join(' · ') || 'network'}
                 onClick={
                   net
                     ? () => navigate({ name: 'network-detail', title: name, props: { id: net.Id } })

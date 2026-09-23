@@ -113,6 +113,62 @@ export function extractComposeImages(
   return [...seen]
 }
 
+/**
+ * Merge the services (and top-level volumes/networks/etc.) from `addition`
+ * into `base`, so "run → compose" adds to the stack instead of replacing it.
+ * Name collisions get a numeric suffix rather than clobbering an existing
+ * service.
+ */
+export function mergeCompose(base: string, addition: string): ComposeFormatResult {
+  const add = addition.trim()
+  if (!add) return { yaml: base, warnings: [] }
+
+  let addDoc: unknown
+  try {
+    addDoc = parse(add)
+  } catch (e) {
+    return { yaml: base, warnings: [], error: (e as Error).message }
+  }
+  if (!isPlainObject(addDoc)) return { yaml: base, warnings: [] }
+
+  const baseYaml = base.trim()
+  if (!baseYaml) return { yaml: stringifyDoc(addDoc), warnings: [] }
+
+  let baseDoc: unknown
+  try {
+    baseDoc = parse(baseYaml)
+  } catch {
+    // Base is not valid YAML — keep the addition so the user doesn't lose it.
+    return { yaml: add, warnings: ['Existing compose file could not be parsed — replaced with the new service'] }
+  }
+  if (!isPlainObject(baseDoc)) return { yaml: add, warnings: [] }
+
+  const warnings: string[] = []
+  const addServices = isPlainObject(addDoc.services) ? addDoc.services : {}
+  const mergedServices: Record<string, unknown> = isPlainObject(baseDoc.services) ? { ...baseDoc.services } : {}
+  for (const [name, svc] of Object.entries(addServices)) {
+    let key = name
+    let n = 2
+    while (key in mergedServices) key = `${name}-${n++}`
+    if (key !== name) warnings.push(`Service "${name}" already exists — added as "${key}"`)
+    mergedServices[key] = svc
+  }
+
+  const out: Record<string, unknown> = {}
+  if ('version' in baseDoc) out.version = baseDoc.version
+  out.services = mergedServices
+  for (const [k, v] of Object.entries(baseDoc)) {
+    if (k !== 'version' && k !== 'services') out[k] = v
+  }
+  for (const k of ['volumes', 'networks', 'configs', 'secrets']) {
+    const extra = (addDoc as Record<string, unknown>)[k]
+    if (isPlainObject(extra)) {
+      out[k] = { ...(isPlainObject(out[k]) ? (out[k] as Record<string, unknown>) : {}), ...extra }
+    }
+  }
+  return { yaml: stringifyDoc(out), warnings }
+}
+
 /** Pure prettify: parse and re-stringify with consistent indentation. */
 export function formatCompose(input: string): ComposeFormatResult {
   const trimmed = input.trim()

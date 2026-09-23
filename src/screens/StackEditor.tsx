@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '../store'
 import { IconArrowRight, IconCheck, IconCopy, IconPlus, IconStack, IconTrash } from '../components/Icons'
 import { CodeEditor, type CodeEditorHandle } from '../components/CodeEditor'
-import { Spinner, Tag } from '../components/ui'
+import { Spinner } from '../components/ui'
 import { dockerRunToCompose, isValidDockerRun } from '../lib/composerize'
-import { formatCompose, normalizeCompose } from '../lib/compose'
-import { sanitizeName } from '../lib/utils'
+import { formatCompose, mergeCompose, normalizeCompose } from '../lib/compose'
+import { ENV_VAR_NAMES } from '../lib/suggest'
+import { copyText, sanitizeName } from '../lib/utils'
 import { getStackFile } from '../lib/api'
 
 const SAMPLE_COMPOSE = `version: "3.8"
@@ -31,13 +32,6 @@ const SAMPLE_RUN = `docker run -d --name my-nginx \\
   --restart unless-stopped \\
   nginx:alpine`
 
-const ENV_SUGGESTIONS = [
-  'DOMAIN', 'TZ', 'NODE_ENV', 'PORT', 'DATABASE_URL', 'API_URL', 'LOG_LEVEL',
-  'POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB',
-  'MYSQL_ROOT_PASSWORD', 'MYSQL_DATABASE', 'MYSQL_USER', 'MYSQL_PASSWORD',
-  'REDIS_PASSWORD', 'NGINX_HOST', 'NGINX_PORT',
-]
-
 interface EnvRow {
   key: string
   value: string
@@ -51,18 +45,41 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
   const toast = useApp((s) => s.toast)
 
   const existing = useMemo(() => stacks.find((s) => s.Id === stackId), [stacks, stackId])
+  const isEdit = !!stackId
 
   const [name, setName] = useState(existing?.Name || '')
   const [mode, setMode] = useState<'compose' | 'env' | 'run'>('compose')
-  const [compose, setCompose] = useState(existing?.File || SAMPLE_COMPOSE)
+  // Editing an existing stack: never show the sample — start empty and show a
+  // loader until the real file arrives (or reuse the cached copy if we have it).
+  const [compose, setCompose] = useState(existing?.File ?? (isEdit ? '' : SAMPLE_COMPOSE))
+  const [composeTouched, setComposeTouched] = useState(false)
   const [run, setRun] = useState(SAMPLE_RUN)
   const [envRows, setEnvRows] = useState<EnvRow[]>(() =>
     existing?.Env ? existing.Env.map((e) => ({ key: e.name, value: e.value })) : [],
   )
   const [busy, setBusy] = useState(false)
+  const [loadingFile, setLoadingFile] = useState(isEdit && !existing?.File)
+  const [loadError, setLoadError] = useState('')
   const [notes, setNotes] = useState<{ error?: string; warnings: string[] }>({ warnings: [] })
   const [envRaw, setEnvRaw] = useState(false)
+  const [envFocus, setEnvFocus] = useState<number | null>(null)
   const editorRef = useRef<CodeEditorHandle>(null)
+
+  const loadFile = useMemo(
+    () => async () => {
+      if (!stackId) return
+      setLoadingFile(true)
+      setLoadError('')
+      try {
+        setCompose(await getStackFile(stackId))
+      } catch (e) {
+        setLoadError((e as Error).message)
+      } finally {
+        setLoadingFile(false)
+      }
+    },
+    [stackId],
+  )
 
   // When editing an existing stack, load its current compose file — the stack
   // list endpoint doesn't include the file contents.
@@ -70,18 +87,12 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
     if (!stackId) return
     if (existing?.File) {
       setCompose(existing.File)
+      setLoadingFile(false)
+      setLoadError('')
       return
     }
-    let alive = true
-    getStackFile(stackId)
-      .then((f) => {
-        if (alive) setCompose(f)
-      })
-      .catch(() => {}) // keep the sample if the file can't be loaded
-    return () => {
-      alive = false
-    }
-  }, [stackId, existing?.File])
+    void loadFile()
+  }, [stackId, existing?.File, loadFile])
 
   const convert = () => {
     if (!isValidDockerRun(run)) {
@@ -89,10 +100,23 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
       return
     }
     const res = dockerRunToCompose(run)
-    setCompose(res.yaml)
-    if (!name.trim()) setName(sanitizeName(res.serviceName))
+    if (!res.yaml) {
+      toast(res.warnings[res.warnings.length - 1] || 'Could not convert command', 'error')
+      return
+    }
+    // Append to the existing compose rather than replacing it. For a brand-new
+    // stack whose sample hasn't been touched, start clean instead.
+    const base = !isEdit && !composeTouched ? '' : compose
+    const merged = mergeCompose(base, res.yaml)
+    if (merged.error) {
+      setNotes({ error: merged.error, warnings: [] })
+      return
+    }
+    setCompose(merged.yaml)
+    setNotes({ warnings: [...res.warnings, ...merged.warnings] })
+    if (!isEdit && !name.trim()) setName(sanitizeName(res.serviceName))
     setMode('compose')
-    setNotes({ warnings: res.warnings })
+    toast('Service added to compose', 'success')
   }
 
   const applyFormat = () => {
@@ -137,7 +161,7 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(compose)
+      await copyText(compose)
       toast('Copied', 'success')
     } catch {
       toast('Copy failed', 'error')
@@ -150,10 +174,12 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
 
   const addEnvRow = (key = '') => {
     setEnvRows((rows) => [...rows, { key, value: '' }])
+    setEnvFocus(envRows.length)
   }
 
   const removeEnvRow = (i: number) => {
     setEnvRows((rows) => rows.filter((_, idx) => idx !== i))
+    setEnvFocus(null)
   }
 
   // The raw .env textarea is uncontrolled; fold its text back into rows so it
@@ -178,6 +204,7 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
 
   const selectMode = (next: 'compose' | 'env' | 'run') => {
     if (next !== 'env') commitRawEnv()
+    if (next !== 'env') setEnvFocus(null)
     setMode(next)
   }
 
@@ -185,26 +212,36 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
   // edits and returns to the YAML tab so the stack itself can be updated.
   const saveEnv = () => {
     commitRawEnv()
+    setEnvFocus(null)
     setMode('compose')
   }
 
+  const envSuggestions = useMemo(() => {
+    if (envFocus === null) return []
+    const q = (envRows[envFocus]?.key || '').toLowerCase()
+    const pool = [...new Set([...envRows.map((r) => r.key.trim()).filter(Boolean), ...ENV_VAR_NAMES])]
+    return pool
+      .filter((k) => k.toLowerCase().includes(q) && k.toLowerCase() !== q)
+      .slice(0, 8)
+  }, [envFocus, envRows])
+
+  const editorReady = !loadingFile && !loadError && !!compose.trim()
+
   return (
     <div className={mode === 'compose' ? 'page page-editor' : 'page'}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-        <div style={{ flex: 1 }}>
+      {!isEdit && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
           <input
             className="input"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Stack name"
-            disabled={!!existing}
             autoCapitalize="none"
           />
         </div>
-        {existing && <Tag>{existing.Name}</Tag>}
-      </div>
+      )}
 
-      <div className="segmented" style={{ marginTop: 8 }}>
+      <div className="segmented" style={{ marginTop: isEdit ? 8 : 8 }}>
         <button className={mode === 'compose' ? 'active' : ''} onClick={() => selectMode('compose')}>
           Compose
         </button>
@@ -217,27 +254,45 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
       </div>
 
       {mode === 'compose' && (
-        <div style={{ marginTop: 8, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div className="editor-fill">
           <div style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center', overflowX: 'auto' }}>
-            <button className="btn sm ghost" onClick={applyFormat}>Format</button>
-            <button className="btn sm ghost" onClick={applySchema}>Apply schema</button>
+            <button className="btn sm ghost" onClick={applyFormat} disabled={!editorReady}>Format</button>
+            <button className="btn sm ghost" onClick={applySchema} disabled={!editorReady}>Apply schema</button>
             <div style={{ flex: 1 }} />
-            <button className="icon-btn" style={{ width: 32, height: 32 }} onClick={copy} aria-label="Copy">
+            <button className="icon-btn" style={{ width: 32, height: 32 }} onClick={copy} aria-label="Copy" disabled={!editorReady}>
               <IconCopy size={15} />
             </button>
           </div>
 
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', marginTop: 6 }}>
-            <CodeEditor
-              ref={editorRef}
-              value={compose}
-              onChange={setCompose}
-              minHeight={160}
-              grow
-              placeholder={'services:\n  app:\n    image: nginx:alpine'}
-              extraEnv={envRows.map((r) => r.key.trim()).filter(Boolean)}
-            />
-          </div>
+          {loadingFile ? (
+            <div className="editor-loading">
+              <Spinner size={22} />
+              <span>Loading compose file…</span>
+            </div>
+          ) : loadError ? (
+            <div className="card" style={{ borderColor: 'var(--red)', background: 'var(--red-soft)' }}>
+              <div style={{ color: 'var(--red)', fontSize: 12.5, fontWeight: 600 }}>Could not load the stack file</div>
+              <div className="mono" style={{ color: 'var(--red)', fontSize: 11.5, marginTop: 2 }}>{loadError}</div>
+              <button className="btn sm ghost" style={{ marginTop: 8 }} onClick={() => void loadFile()}>
+                Retry
+              </button>
+            </div>
+          ) : (
+            <div className="editor-fill-inner">
+              <CodeEditor
+                ref={editorRef}
+                value={compose}
+                onChange={(v) => {
+                  setCompose(v)
+                  setComposeTouched(true)
+                }}
+                minHeight={160}
+                grow
+                placeholder={'services:\n  app:\n    image: nginx:alpine'}
+                extraEnv={envRows.map((r) => r.key.trim()).filter(Boolean)}
+              />
+            </div>
+          )}
 
           {notes.error && (
             <div className="card" style={{ marginTop: 6, borderColor: 'var(--red)', background: 'var(--red-soft)' }}>
@@ -285,16 +340,37 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
                 )}
                 {envRows.map((row, i) => (
                   <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-                    <input className="input mono" style={{ flex: '1 1 40%' }} value={row.key} onChange={(e) => updateEnvRow(i, { key: e.target.value })} placeholder="KEY" autoCapitalize="none" autoCorrect="off" list="env-keys" />
-                    <input className="input" style={{ flex: '1 1 60%' }} value={row.value} onChange={(e) => updateEnvRow(i, { value: e.target.value })} placeholder="value" autoCapitalize="none" autoCorrect="off" />
+                    <input
+                      className="input mono"
+                      style={{ flex: '1 1 40%' }}
+                      value={row.key}
+                      onChange={(e) => updateEnvRow(i, { key: e.target.value })}
+                      onFocus={() => setEnvFocus(i)}
+                      placeholder="KEY"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                    />
+                    <input className="input" style={{ flex: '1 1 60%' }} value={row.value} onChange={(e) => updateEnvRow(i, { value: e.target.value })} onFocus={() => setEnvFocus(null)} placeholder="value" autoCapitalize="none" autoCorrect="off" />
                     <button className="icon-btn" style={{ width: 34, height: 34 }} onClick={() => removeEnvRow(i)} aria-label="Remove"><IconTrash size={15} /></button>
                   </div>
                 ))}
-                <datalist id="env-keys">
-                  {ENV_SUGGESTIONS.map((key) => (
-                    <option key={key} value={key} />
-                  ))}
-                </datalist>
+                {envSuggestions.length > 0 && (
+                  <div className="chip-row" style={{ marginTop: 4 }}>
+                    {envSuggestions.map((k) => (
+                      <button
+                        key={k}
+                        className="chip"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          if (envFocus !== null) updateEnvRow(envFocus, { key: k })
+                          setEnvFocus(null)
+                        }}
+                      >
+                        {k}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -311,10 +387,10 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
             spellCheck={false}
           />
           <button className="btn primary full" style={{ marginTop: 8 }} onClick={convert} disabled={!run.trim()}>
-            <IconArrowRight size={17} /> Convert to compose
+            <IconArrowRight size={17} /> Add to compose
           </button>
           <div className="hint" style={{ marginTop: 6 }}>
-            Supports -p, -v, -e, --env-file, --restart, --network, --link, -m, --cpus, --entrypoint and more.
+            The converted service is appended to your compose file. Supports -p, -v, -e, --env-file, --restart, --network, --link, -m, --cpus, --entrypoint and more.
           </div>
         </div>
       )}
@@ -328,7 +404,7 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
           className="btn primary full"
           style={{ marginTop: 14 }}
           onClick={save}
-          disabled={busy || !name.trim() || !compose.trim()}
+          disabled={busy || loadingFile || !!loadError || !name.trim() || !compose.trim()}
         >
           {busy ? <Spinner size={17} /> : existing ? <IconCheck size={17} /> : <IconStack size={17} />}
           {busy ? (existing ? 'Updating…' : 'Deploying…') : existing ? 'Update' : 'Deploy stack'}

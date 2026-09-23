@@ -9,6 +9,34 @@ export function jsonClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value))
 }
 
+// Copy plain text verbatim. Prefer the async Clipboard API, but fall back to a
+// hidden textarea + execCommand for iOS/insecure contexts where it's missing —
+// and never transform the text (no URL-encoding).
+export async function copyText(text: string): Promise<void> {
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return
+    } catch {
+      /* fall through to the legacy path */
+    }
+  }
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.setAttribute('readonly', '')
+  ta.style.position = 'fixed'
+  ta.style.top = '-9999px'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.select()
+  ta.setSelectionRange(0, text.length)
+  try {
+    if (!document.execCommand('copy')) throw new Error('Copy failed')
+  } finally {
+    document.body.removeChild(ta)
+  }
+}
+
 export function bytes(n: number, digits = 1): string {
   if (!n) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']

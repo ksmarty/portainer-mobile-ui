@@ -255,8 +255,20 @@ export function getSuggestions(text: string, caret: number, extraEnv: string[] =
     }
   }
 
-  // Only trigger once the user has actually typed a character (spaces don't count).
-  if (!word) return { items: [], replaceFrom, filterText: '' }
+  // On an empty (indented) line we normally stay quiet, but map blocks like
+  // environment:/healthcheck: should still offer completions — otherwise the
+  // popup never appears until a character is typed, which feels broken.
+  if (!word) {
+    const parent = findParent(lines, currentIndex, currentIndent)
+    const parentKey = parent?.key || null
+    if (parentKey === 'environment' && currentIndent >= 4) {
+      return { items: envItems(extraEnv, 'map'), replaceFrom, filterText: '' }
+    }
+    if (parentKey && parentKey in MAP_SUBKEYS && currentIndent >= 4) {
+      return { items: MAP_SUBKEYS[parentKey], replaceFrom, filterText: '' }
+    }
+    return { items: [], replaceFrom, filterText: '' }
+  }
 
   // If there is a colon before the word, we are typing a value — no key suggestions.
   if (/:/.test(beforeWord)) {

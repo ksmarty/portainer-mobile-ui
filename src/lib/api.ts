@@ -315,22 +315,33 @@ async function sampleContainerUsage(
 
 /* ------------------------------ containers -------------------------------- */
 
+// Docker's container payloads nest the fields the UI needs under
+// NetworkSettings / HostConfig. Flatten them once here so screens can read
+// `Networks`, `IPs`, `NetworkMode` and `RestartPolicy` directly.
+function normalizeContainer(raw: any): Container {
+  const nets: Record<string, any> = raw?.NetworkSettings?.Networks || {}
+  const netNames = Object.keys(nets)
+  const host = raw?.HostConfig || {}
+  return {
+    ...raw,
+    Networks: raw?.Networks ?? netNames,
+    IPs: raw?.IPs ?? netNames.map((n) => nets[n]?.IPAddress).filter(Boolean),
+    NetworkMode: raw?.NetworkMode ?? host?.NetworkMode,
+    RestartPolicy: raw?.RestartPolicy ?? host?.RestartPolicy?.Name,
+  }
+}
+
 export function getContainers(endpointId: number, all = true): Promise<Container[]> {
   if (isDemo()) return demoDelay(demoGet<Container[]>('containers'))
   const key = cacheKey(dockerPath(endpointId, '/containers/json'), { all })
   const cached = getCache<Container[]>(key)
   if (cached) return Promise.resolve(cached)
-  return portainerFetch<Container[]>(dockerPath(endpointId, '/containers/json'), undefined, { all, size: 0 }).then((d) =>
-    setCache(key, d),
+  return portainerFetch<any[]>(dockerPath(endpointId, '/containers/json'), undefined, { all, size: 0 }).then((d) =>
+    setCache(
+      key,
+      d.map(normalizeContainer),
+    ),
   )
-}
-
-export function getContainer(endpointId: number, id: string): Promise<Container> {
-  if (isDemo()) return demoDelay(demoGet<Container[]>('containers').find((c) => c.Id === id)!)
-  const key = cacheKey(dockerPath(endpointId, `/containers/${id}/json`))
-  const cached = getCache<Container>(key)
-  if (cached) return Promise.resolve(cached)
-  return portainerFetch<Container>(dockerPath(endpointId, `/containers/${id}/json`)).then((d) => setCache(key, d, 8000))
 }
 
 export function containerAction(endpointId: number, id: string, action: string): Promise<void> {

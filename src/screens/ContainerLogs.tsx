@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useApp } from '../store'
 import { IconCopy, IconPlay, IconRefresh, IconTerminal } from '../components/Icons'
 import { Empty, Spinner } from '../components/ui'
+import { copyText } from '../lib/utils'
 
 // Number of log lines requested from Docker.
 const LOG_TAIL = 150
@@ -25,7 +26,7 @@ export function ContainerLogsScreen({ id }: { id: string }) {
   const copy = async () => {
     const text = logs.map((l) => l.text).join('\n')
     try {
-      await navigator.clipboard.writeText(text)
+      await copyText(text)
       toast('Logs copied', 'success')
     } catch {
       toast('Copy failed', 'error')

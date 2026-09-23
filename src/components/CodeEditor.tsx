@@ -96,6 +96,13 @@ export const CodeEditor = forwardRef<CodeEditorHandle, {
   const [active, setActive] = useState(0)
   const [hidden, setHidden] = useState(false)
   const [pos, setPos] = useState<CaretPos | null>(null)
+  // Caret position right after accepting a suggestion; used to keep the popup
+  // closed there but let it reopen as soon as the caret moves elsewhere.
+  const acceptedRef = useRef(-1)
+
+  useEffect(() => {
+    if (hidden && caret !== acceptedRef.current) setHidden(false)
+  }, [caret, hidden])
 
   const html = useMemo(() => highlightYaml(value) + '\n', [value])
 
@@ -175,9 +182,10 @@ export const CodeEditor = forwardRef<CodeEditorHandle, {
     const next = value.slice(0, rawSug.replaceFrom) + item.insert + value.slice(caret)
     onChange(next)
     setHidden(true)
+    const pos = rawSug.replaceFrom + item.insert.length
+    acceptedRef.current = pos
     requestAnimationFrame(() => {
       ta.focus()
-      const pos = rawSug.replaceFrom + item.insert.length
       ta.setSelectionRange(pos, pos)
       setCaret(pos)
     })
