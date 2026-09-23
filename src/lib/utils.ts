@@ -3,11 +3,10 @@ export function uid(prefix = 'id'): string {
 }
 
 export function jsonClone<T>(value: T): T {
+  // Note: JSON.stringify(undefined) is undefined, which JSON.parse rejects —
+  // don't blow up the timer/action that cloned a void result.
+  if (value === undefined) return value
   return JSON.parse(JSON.stringify(value))
-}
-
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 export function bytes(n: number, digits = 1): string {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useApp } from '../store'
-import { IconBroom, IconDownload, IconImage, IconPlus, IconSearch, IconTrash } from '../components/Icons'
+import { IconBroom, IconImage, IconPlus, IconSearch, IconTrash } from '../components/Icons'
 import { Empty, ListItem, Skeleton, Spinner } from '../components/ui'
 import { bytes, shortId, timeAgo } from '../lib/utils'
 import { getDanglingImages } from '../lib/api'

@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useApp } from '../store'
-import { IconBox, IconEdit, IconFile, IconPlay, IconStack, IconStop, IconTrash } from '../components/Icons'
-import { Empty, KV, Pill, SectionTitle, Tag } from '../components/ui'
+import {
+  IconBox,
+  IconChevronRight,
+  IconDownload,
+  IconEdit,
+  IconFile,
+  IconPlay,
+  IconStack,
+  IconStop,
+  IconTrash,
+} from '../components/Icons'
+import { Empty, KV, Pill, SectionTitle, Spinner, Tag } from '../components/ui'
 import { portLabel, stateColor, stateLabel, timeAgo } from '../lib/utils'
 import type { Container } from '../lib/types'
 import { ConfirmModal } from '../components/ConfirmModal'
@@ -12,9 +22,11 @@ export function StackDetailScreen({ id, fileOverride }: { id: number; fileOverri
   const openStackFile = useApp((s) => s.openStackFile)
   const doStackAction = useApp((s) => s.doStackAction)
   const doRemoveStack = useApp((s) => s.doRemoveStack)
+  const doPullStackImages = useApp((s) => s.doPullStackImages)
   const navigate = useApp((s) => s.navigate)
   const back = useApp((s) => s.back)
   const [confirm, setConfirm] = useState(false)
+  const [pulling, setPulling] = useState(false)
 
   const stack = useMemo(() => stacks.find((s) => s.Id === id), [stacks, id])
 
@@ -39,6 +51,17 @@ export function StackDetailScreen({ id, fileOverride }: { id: number; fileOverri
 
   const file = fileOverride ?? null
 
+  const pullLatestImages = async () => {
+    setPulling(true)
+    try {
+      await doPullStackImages(id)
+    } catch {
+      /* toast handled in the store */
+    } finally {
+      setPulling(false)
+    }
+  }
+
   return (
     <div className="page">
       {stack && (
@@ -60,6 +83,12 @@ export function StackDetailScreen({ id, fileOverride }: { id: number; fileOverri
             </button>
             <button className="btn" onClick={() => void doStackAction(stack.Id, 'stop')}>
               <IconStop size={15} /> Stop
+            </button>
+          </div>
+          <div className="btn-row">
+            <button className="btn primary" disabled={pulling} onClick={() => void pullLatestImages()}>
+              {pulling ? <Spinner size={15} /> : <IconDownload size={15} />}
+              {pulling ? 'Pulling images…' : 'Pull latest & update'}
             </button>
           </div>
           <div className="btn-row">
@@ -153,7 +182,9 @@ function StackContainerRow({ c, onClick }: { c: Container; onClick: () => void }
         </div>
       </div>
       <Pill color={color}>{stateLabel(c.State)}</Pill>
-      <span className="chev">›</span>
+      <span className="chev">
+        <IconChevronRight size={18} />
+      </span>
     </div>
   )
 }

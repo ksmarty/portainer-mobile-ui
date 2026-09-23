@@ -48,12 +48,14 @@ body {
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
-  /* Mobile UX: never allow the whole page to scroll sideways. */
-  overflow-x: hidden;
+  /* The app owns its scrolling: lock the document so iOS can't rubber-band
+     the whole page or scroll the fixed shell out of view. */
+  height: 100%;
+  overflow: hidden;
 }
 
 #root {
-  min-height: 100vh;
+  height: var(--app-height, 100dvh);
 }
 
 button {
@@ -95,8 +97,9 @@ a {
   max-width: 520px;
   margin: 0 auto;
   /* Fixed-height column: header and bottom nav stay put, only the middle
-     (.app-scroll) scrolls. */
-  height: var(--app-height, 100dvh);
+     (.app-scroll) scrolls. 100% of #root, which is pinned to the visual
+     viewport for iOS PWAs. */
+  height: 100%;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -565,7 +568,7 @@ a {
 
 .tabbar-inner {
   display: flex;
-  padding: 3px 4px 2px;
+  padding: 5px 4px 3px;
 }
 
 .tab {
@@ -855,6 +858,8 @@ a {
   color: transparent;
   caret-color: #eef1f8;
   -webkit-text-fill-color: transparent;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 .code-editor-textarea::placeholder {
@@ -862,10 +867,6 @@ a {
   -webkit-text-fill-color: #5a6480;
 }
 
-.code-editor-textarea {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
 .code-editor-textarea::-webkit-scrollbar {
   display: none;
 }
@@ -1084,7 +1085,7 @@ a {
 
 .quick-actions {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 5px;
   margin: 8px 0;
 }

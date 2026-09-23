@@ -11,7 +11,7 @@ import {
   IconUsers,
   IconWifi,
 } from '../components/Icons'
-import { Ring, SectionTitle, Skeleton } from '../components/ui'
+import { Ring, ListItem, SectionTitle, Skeleton } from '../components/ui'
 
 export function HomeScreen() {
   const dashboard = useApp((s) => s.dashboard)
@@ -137,14 +137,5 @@ function Stat({
 
 function QuickItem({ icon, label, sub, to }: { icon: React.ReactNode; label: string; sub: string; to: any }) {
   const navigate = useApp((s) => s.navigate)
-  return (
-    <div className="list-item" onClick={() => navigate(to)}>
-      <div className="item-icon">{icon}</div>
-      <div className="item-main">
-        <div className="item-title">{label}</div>
-        <div className="item-sub">{sub}</div>
-      </div>
-      <span className="chev">›</span>
-    </div>
-  )
+  return <ListItem icon={icon} title={label} sub={sub} onClick={() => navigate(to)} />
 }

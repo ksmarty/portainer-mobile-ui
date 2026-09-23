@@ -21,64 +21,29 @@
     <meta name="apple-mobile-web-app-title" content="Portainer" />
 
     <script>
-      // Standalone (installed) PWA height handling for iOS.
-      // iOS reports the full screen size rather than the usable webview, so the
-      // shell can under/overflow around the Dynamic Island and home indicator.
-      // We track the largest plausible visual-viewport height per orientation,
-      // apply it as --app-height, and re-measure as the viewport changes.
+      // Viewport height for iOS Safari and installed PWAs.
+      // iOS reports the layout viewport independently of the *visible* area,
+      // so 100vh / height:100% can be taller than what the user actually sees
+      // (content ends up hidden behind the browser toolbar or the home
+      // indicator). Track the visual viewport instead and expose it as
+      // --app-height; CSS falls back to 100dvh when JS is unavailable.
       (function () {
-        var key = 'pm-app-height-v1'
-        function cap() {
-          return Math.round(screen.height * window.devicePixelRatio) || window.innerHeight
+        var root = document.documentElement
+        function setHeight() {
+          var vv = window.visualViewport
+          var h = (vv && vv.height) || window.innerHeight || 0
+          if (h > 0) root.style.setProperty('--app-height', Math.round(h) + 'px')
         }
-        function portrait() {
-          return window.matchMedia('(orientation: portrait)').matches
+        setHeight()
+        window.addEventListener('resize', setHeight, { passive: true })
+        window.addEventListener('orientationchange', setHeight, { passive: true })
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener('resize', setHeight, { passive: true })
+          window.visualViewport.addEventListener('scroll', setHeight, { passive: true })
         }
-        var cur = portrait() ? 'p' : 'l'
-        function readStored() {
-          try {
-            var o = JSON.parse(localStorage.getItem(key) || '{}')
-            return o[cur] || 0
-          } catch (e) {
-            return 0
-          }
-        }
-        function store() {
-          try {
-            var o = JSON.parse(localStorage.getItem(key) || '{}')
-            o[cur] = best
-            localStorage.setItem(key, JSON.stringify(o))
-          } catch (e) {}
-        }
-        function set() {
-          var c = cap()
-          var hh = window.innerHeight || c
-          var vv = window.visualViewport ? window.visualViewport.height : hh
-          if (standalone) {
-            hh = Math.min(hh, c)
-            vv = Math.min(vv, c)
-            best = Math.max(hh, vv)
-            if (best <= (readStored() || 0)) {
-              document.documentElement.style.setProperty('--app-height', best + 'px')
-              return
-            }
-            store()
-          } else {
-            best = hh
-          }
-          document.documentElement.style.setProperty('--app-height', best + 'px')
-        }
-        window.addEventListener('orientationchange', function () {
-          cur = portrait() ? 'p' : 'l'
-          set()
-        })
-        window.addEventListener('resize', set)
-        if (window.visualViewport) window.visualViewport.addEventListener('resize', set)
-        window.addEventListener('pointerdown', set)
         document.addEventListener('visibilitychange', function () {
-          if (!document.hidden) set()
+          if (!document.hidden) setHeight()
         })
-        set()
       })()
     </script>
   </head>

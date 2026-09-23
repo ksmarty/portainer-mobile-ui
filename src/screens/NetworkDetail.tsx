@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useApp } from '../store'
 import { IconNetwork } from '../components/Icons'
-import { Empty, KV, Pill, SectionTitle, Skeleton } from '../components/ui'
+import { Empty, KV, SectionTitle, Skeleton } from '../components/ui'
 import { timeAgo } from '../lib/utils'
 import { getNetworkInfo } from '../lib/api'
 import type { NetworkDetail } from '../lib/types'
@@ -21,7 +21,7 @@ export function NetworkDetailScreen({ id }: { id: string }) {
     }
   }, [ep, id])
 
-  if (error) return <div className="page"><div className="card" style={{ color: 'var(--danger)' }}>{error}</div></div>
+  if (error) return <div className="page"><div className="card" style={{ color: 'var(--red)' }}>{error}</div></div>
   if (!info)
     return (
       <div className="page">

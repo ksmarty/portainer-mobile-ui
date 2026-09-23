@@ -156,6 +156,38 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
     setEnvRows((rows) => rows.filter((_, idx) => idx !== i))
   }
 
+  // The raw .env textarea is uncontrolled; fold its text back into rows so it
+  // isn't silently lost when leaving the tab.
+  const commitRawEnv = () => {
+    if (!envRaw) return
+    const ta = document.getElementById('env-raw') as HTMLTextAreaElement | null
+    if (ta) {
+      const parsed = ta.value
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l && !l.startsWith('#'))
+        .map((l) => {
+          const eq = l.indexOf('=')
+          return eq > 0 ? { key: l.slice(0, eq).trim(), value: l.slice(eq + 1).trim() } : { key: l, value: '' }
+        })
+        .filter((r) => r.key)
+      setEnvRows(parsed)
+    }
+    setEnvRaw(false)
+  }
+
+  const selectMode = (next: 'compose' | 'env' | 'run') => {
+    if (next !== 'env') commitRawEnv()
+    setMode(next)
+  }
+
+  // Env vars are local until the compose file is saved. "Save" here keeps the
+  // edits and returns to the YAML tab so the stack itself can be updated.
+  const saveEnv = () => {
+    commitRawEnv()
+    setMode('compose')
+  }
+
   return (
     <div className={mode === 'compose' ? 'page page-editor' : 'page'}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
@@ -173,13 +205,13 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
       </div>
 
       <div className="segmented" style={{ marginTop: 8 }}>
-        <button className={mode === 'compose' ? 'active' : ''} onClick={() => setMode('compose')}>
+        <button className={mode === 'compose' ? 'active' : ''} onClick={() => selectMode('compose')}>
           Compose
         </button>
-        <button className={mode === 'env' ? 'active' : ''} onClick={() => setMode('env')}>
+        <button className={mode === 'env' ? 'active' : ''} onClick={() => selectMode('env')}>
           Env vars
         </button>
-        <button className={mode === 'run' ? 'active' : ''} onClick={() => setMode('run')}>
+        <button className={mode === 'run' ? 'active' : ''} onClick={() => selectMode('run')}>
           run → compose
         </button>
       </div>
@@ -232,7 +264,7 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
               <span style={{ fontSize: 12.5, fontWeight: 700 }}>Stack environment variables</span>
               <div style={{ display: 'flex', gap: 6 }}>
-                <button className="btn sm ghost" onClick={() => { if (envRaw) { const ta = document.getElementById('env-raw') as HTMLTextAreaElement; if (ta) { const lines = ta.value.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).map(l => { const e = l.indexOf('='); return e > 0 ? { key: l.slice(0, e).trim(), value: l.slice(e + 1).trim() } : { key: l.trim(), value: '' } }); setEnvRows(lines); setEnvRaw(false); } } else { setEnvRaw(true); } }}>
+                <button className="btn sm ghost" onClick={() => (envRaw ? commitRawEnv() : setEnvRaw(true))}>
                   {envRaw ? 'Structured' : 'Raw .env'}
                 </button>
                 {!envRaw && <button className="btn sm ghost" onClick={() => addEnvRow()}><IconPlus size={14} /> Add</button>}
@@ -287,15 +319,21 @@ export function StackEditorScreen({ stackId }: { stackId?: number }) {
         </div>
       )}
 
-      <button
-        className="btn primary full"
-        style={{ marginTop: 14 }}
-        onClick={save}
-        disabled={busy || !name.trim() || !compose.trim()}
-      >
-        {busy ? <Spinner size={17} /> : existing ? <IconCheck size={17} /> : <IconStack size={17} />}
-        {busy ? 'Saving…' : existing ? 'Save changes' : 'Deploy stack'}
-      </button>
+      {mode === 'env' ? (
+        <button className="btn primary full" style={{ marginTop: 14 }} onClick={saveEnv}>
+          <IconCheck size={17} /> Save environment
+        </button>
+      ) : (
+        <button
+          className="btn primary full"
+          style={{ marginTop: 14 }}
+          onClick={save}
+          disabled={busy || !name.trim() || !compose.trim()}
+        >
+          {busy ? <Spinner size={17} /> : existing ? <IconCheck size={17} /> : <IconStack size={17} />}
+          {busy ? (existing ? 'Updating…' : 'Deploying…') : existing ? 'Update' : 'Deploy stack'}
+        </button>
+      )}
     </div>
   )
 }

@@ -72,6 +72,47 @@ function stringifyDoc(doc: unknown): string {
   return stringify(doc, { indent: 2, lineWidth: 0, defaultStringType: 'PLAIN', defaultKeyType: 'PLAIN' })
 }
 
+/**
+ * Every distinct `image:` reference declared in a compose file, with stack env
+ * variables interpolated the same way `docker compose` would (e.g.
+ * `${REGISTRY}/app:${TAG}`). Used by "pull latest images for this stack".
+ */
+export function extractComposeImages(
+  input: string,
+  env: { name: string; value: string }[] = [],
+): string[] {
+  const vars = new Map(env.map((e) => [e.name, e.value]))
+  const interpolate = (value: string) =>
+    value
+      // ${VAR:-default} / ${VAR-default} / ${VAR:?err} / ${VAR?err}
+      .replace(
+        /\$\{([A-Za-z_][A-Za-z0-9_]*)(:?[-?])([^}]*)\}/g,
+        (_, key: string, op: string, arg: string) => {
+          const v = vars.get(key)
+          if (v !== undefined && v !== '') return v
+          return op === ':-' || op === '-' ? arg : ''
+        },
+      )
+      .replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, key: string) => vars.get(key) ?? '')
+      .replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_, key: string) => vars.get(key) ?? '')
+
+  let doc: unknown
+  try {
+    doc = parse(input)
+  } catch {
+    return []
+  }
+  if (!isPlainObject(doc) || !isPlainObject(doc.services)) return []
+
+  const seen = new Set<string>()
+  for (const svc of Object.values(doc.services)) {
+    if (!isPlainObject(svc) || typeof svc.image !== 'string') continue
+    const image = interpolate(svc.image).trim()
+    if (image) seen.add(image)
+  }
+  return [...seen]
+}
+
 /** Pure prettify: parse and re-stringify with consistent indentation. */
 export function formatCompose(input: string): ComposeFormatResult {
   const trimmed = input.trim()

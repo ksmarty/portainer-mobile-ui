@@ -75,8 +75,6 @@ export const ENV_VAR_NAMES = [
   'GRAFANA_ADMIN_PASSWORD', 'GF_SECURITY_ADMIN_USER', 'GF_SECURITY_ADMIN_PASSWORD',
 ]
 
-const ENV_VARS: Suggestion[] = ENV_VAR_NAMES.map((k) => ({ label: k, insert: `${k}: `, hint: 'env' }))
-
 function envItems(extraEnv: string[], mode: 'map' | 'interp'): Suggestion[] {
   const names = [...new Set([...extraEnv.filter(Boolean), ...ENV_VAR_NAMES])]
   return names.map((n) =>

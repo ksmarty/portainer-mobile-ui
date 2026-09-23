@@ -5,6 +5,7 @@ import {
   IconBox,
   IconDownload,
   IconInfo,
+  IconNetwork,
   IconPause,
   IconPlay,
   IconRestart,
@@ -12,13 +13,14 @@ import {
   IconTerminal,
   IconTrash,
 } from '../components/Icons'
-import { KV, Pill, SectionTitle, Spinner, Tag } from '../components/ui'
+import { KV, ListItem, Pill, SectionTitle, Spinner, Tag } from '../components/ui'
 import { bytes, shortId, stateColor, stateLabel, timeAgo } from '../lib/utils'
 import { getImageInfo } from '../lib/api'
-import type { Container, ImageInfo } from '../lib/types'
+import type { ImageInfo } from '../lib/types'
 
 export function ContainerDetailScreen({ id }: { id: string }) {
   const containers = useApp((s) => s.containers)
+  const networks = useApp((s) => s.networks)
   const doContainerAction = useApp((s) => s.doContainerAction)
   const doRemoveContainer = useApp((s) => s.doRemoveContainer)
   const doFetchNewImage = useApp((s) => s.doFetchNewImage)
@@ -141,12 +143,36 @@ export function ContainerDetailScreen({ id }: { id: string }) {
         </>
       )}
 
-      <SectionTitle>Network</SectionTitle>
+      <SectionTitle>Networks</SectionTitle>
       <div className="card">
         <KV k="Mode" v={c.NetworkMode || '—'} />
-        {c.Networks?.length ? <KV k="Networks" v={c.Networks.join(', ')} /> : null}
         {c.IPs?.length ? <KV k="IP address" v={c.IPs.join(', ')} mono /> : null}
+        {!c.Networks?.length && <KV k="Attached" v="none" />}
       </div>
+      {!!c.Networks?.length && (
+        <div className="card-list" style={{ marginTop: 6 }}>
+          {c.Networks.map((name) => {
+            const net = networks.find((n) => n.Name === name)
+            return (
+              <ListItem
+                key={name}
+                icon={
+                  <div className="item-icon" style={{ background: 'var(--blue-soft)', color: 'var(--blue)' }}>
+                    <IconNetwork size={18} />
+                  </div>
+                }
+                title={name}
+                sub={net ? `${net.Driver}${net.Internal ? ' · internal' : ''}` : 'network'}
+                onClick={
+                  net
+                    ? () => navigate({ name: 'network-detail', title: name, props: { id: net.Id } })
+                    : undefined
+                }
+              />
+            )
+          })}
+        </div>
+      )}
 
       {confirmRemove && (
         <RemoveConfirm
@@ -256,7 +282,7 @@ function ImageInfoSheet({
     }
   }, [ep, imageId])
   return (
-    <div className="overlay overlay-bottom" onClick={onClose}>
+    <div className="overlay" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <div className="sheet-handle" />
         <div className="sheet-title">
@@ -268,7 +294,7 @@ function ImageInfoSheet({
           </button>
         </div>
         {err ? (
-          <div style={{ color: 'var(--danger)', fontSize: 13.5, padding: '10px 0' }}>{err}</div>
+          <div style={{ color: 'var(--red)', fontSize: 13.5, padding: '10px 0' }}>{err}</div>
         ) : !info ? (
           <div style={{ padding: '18px 0', display: 'flex', justifyContent: 'center' }}>
             <Spinner size={20} />

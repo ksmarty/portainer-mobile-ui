@@ -1,20 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
 import { useApp } from '../store'
-import { IconCopy, IconDownload, IconPlay, IconRefresh, IconTerminal } from '../components/Icons'
+import { IconCopy, IconPlay, IconRefresh, IconTerminal } from '../components/Icons'
 import { Empty, Spinner } from '../components/ui'
+
+// Number of log lines requested from Docker.
+const LOG_TAIL = 150
 
 export function ContainerLogsScreen({ id }: { id: string }) {
   const logs = useApp((s) => s.logs)
   const loadLogs = useApp((s) => s.loadLogs)
   const toast = useApp((s) => s.toast)
   const [following, setFollowing] = useState(true)
-  const [tail, setTail] = useState(150)
   const endRef = useRef<HTMLDivElement>(null)
   const loading = logs.length === 0
 
   useEffect(() => {
-    void loadLogs(id, tail)
-  }, [id, tail, loadLogs])
+    void loadLogs(id, LOG_TAIL)
+  }, [id, loadLogs])
 
   useEffect(() => {
     if (following && endRef.current) endRef.current.scrollIntoView({ behavior: 'smooth' })
@@ -36,7 +38,7 @@ export function ContainerLogsScreen({ id }: { id: string }) {
         <button className={`btn sm ${following ? 'primary' : 'ghost'}`} onClick={() => setFollowing(!following)}>
           <IconPlay size={14} /> {following ? 'Following' : 'Paused'}
         </button>
-        <button className="btn sm ghost" onClick={() => void loadLogs(id, tail)}>
+        <button className="btn sm ghost" onClick={() => void loadLogs(id, LOG_TAIL)}>
           <IconRefresh size={14} /> Reload
         </button>
         <div style={{ flex: 1 }} />

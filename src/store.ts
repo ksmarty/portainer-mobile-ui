@@ -5,10 +5,14 @@ import {
   clearCache,
   containerAction,
   createContainer,
+  createEndpoint,
+  createTeam,
+  createUser,
   deployStack,
   getConfig,
   getContainers,
   getContainerLogs,
+  getContainerStats,
   getDashboard,
   getEndpoints,
   getImages,
@@ -21,17 +25,22 @@ import {
   getUsers,
   getVolumes,
   isDemo,
+  pruneImages,
   pullImage,
   removeContainer,
   removeImage,
   removeNetwork,
   removeStack,
+  removeTeam,
+  removeUser,
   removeVolume,
   setConfig,
   setDemoMode,
   stackAction,
   testConnection,
+  updateStack,
 } from './lib/api'
+import { extractComposeImages } from './lib/compose'
 import { demoAddEndpoint, demoAddTeam, demoAddUser, demoRemoveTeam, demoRemoveUser } from './lib/demo'
 import type {
   Container,
@@ -114,6 +123,7 @@ interface AppState {
   doUpdateStack: (id: number, file: string, env?: { name: string; value: string }[]) => Promise<void>
   doRemoveStack: (id: number) => Promise<void>
   doStackAction: (id: number, action: 'start' | 'stop') => Promise<void>
+  doPullStackImages: (id: number) => Promise<void>
   loadLogs: (id: string, tail?: number) => Promise<void>
   startStats: (id: string) => void
   stopStats: () => void
@@ -366,8 +376,11 @@ export const useApp = create<AppState>((set, get) => ({
   refresh: async () => {
     set({ loading: true, error: null })
     try {
+      // A refresh is user/action initiated — always hit the network instead of
+      // serving the short-lived read cache, so UI reflects what just changed.
+      clearCache()
       const id = endpointId(get())
-      const [endpoints, containers, images, volumes, networks, stacks, settings, dashboard] = await Promise.all([
+      const [endpoints, containers, images, volumes, networks, stacks, settings] = await Promise.all([
         getEndpoints(),
         getContainers(id),
         getImages(id),
@@ -375,9 +388,14 @@ export const useApp = create<AppState>((set, get) => ({
         getNetworks(id),
         getStacks(),
         getSettings(),
-        getDashboard(),
       ])
-      set({ endpoints, containers, images, volumes, networks, stacks, settings, dashboard, loading: false })
+      set({ endpoints, containers, images, volumes, networks, stacks, settings, loading: false })
+      // The dashboard aggregates live CPU/memory by sampling container stats
+      // ~1.5s apart. Never make lists/actions wait on it — load it in the
+      // background and fill it in when it arrives.
+      void getDashboard()
+        .then((dashboard) => set({ dashboard }))
+        .catch(() => {})
     } catch (e) {
       set({ loading: false, error: (e as Error).message })
       get().toast('Refresh failed: ' + (e as Error).message, 'error')
@@ -444,8 +462,8 @@ export const useApp = create<AppState>((set, get) => ({
     const ep = endpointId(get())
     try {
       await pullImage(ep, image)
-      await get().refresh()
       get().toast('Image pulled', 'success')
+      await get().refresh()
     } catch (e) {
       get().toast((e as Error).message, 'error')
       throw e
@@ -466,7 +484,6 @@ export const useApp = create<AppState>((set, get) => ({
   doPruneImages: async () => {
     const ep = endpointId(get())
     try {
-      const { pruneImages } = await import('./lib/api')
       const res = await pruneImages(ep)
       if (res.deleted === 0) {
         get().toast('Nothing to clean up', 'info')
@@ -514,7 +531,6 @@ export const useApp = create<AppState>((set, get) => ({
 
   doUpdateStack: async (id, file, env = []) => {
     try {
-      const { updateStack } = await import('./lib/api')
       const existing = get().stacks.find((s) => s.Id === id)
       const ep = existing?.EndpointId ?? endpointId(get())
       await updateStack(id, ep, file, env)
@@ -546,6 +562,32 @@ export const useApp = create<AppState>((set, get) => ({
     }
   },
 
+  // Pull every image referenced by the stack, then re-deploy it with the same
+  // file/env — exactly what a user does by editing the stack and hitting
+  // "Update".
+  doPullStackImages: async (id) => {
+    const stack = get().stacks.find((s) => s.Id === id)
+    const ep = stack?.EndpointId ?? endpointId(get())
+    try {
+      const file = await getStackFile(id)
+      const images = extractComposeImages(file, stack?.Env || [])
+      if (!images.length) {
+        get().toast('No images found in this stack', 'info')
+        return
+      }
+      for (const image of images) {
+        await pullImage(ep, image)
+      }
+      get().toast(`Pulled ${images.length} image${images.length === 1 ? '' : 's'}`, 'success')
+      await updateStack(id, ep, file, stack?.Env || [])
+      get().toast('Stack updated', 'success')
+      await get().refresh()
+    } catch (e) {
+      get().toast((e as Error).message, 'error')
+      throw e
+    }
+  },
+
   loadLogs: async (id, tail = 120) => {
     const ep = endpointId(get())
     set({ logs: [] })
@@ -563,7 +605,6 @@ export const useApp = create<AppState>((set, get) => ({
     if (statsTimer) window.clearInterval(statsTimer)
     const tick = async () => {
       try {
-        const { getContainerStats } = await import('./lib/api')
         const stats = await getContainerStats(ep, id)
         set({ stats })
       } catch {
@@ -597,7 +638,6 @@ export const useApp = create<AppState>((set, get) => ({
       get().toast('Endpoint added', 'success')
       return
     }
-    const { createEndpoint } = await import('./lib/api')
     try {
       await createEndpoint(name, url)
       await get().refresh()
@@ -613,7 +653,6 @@ export const useApp = create<AppState>((set, get) => ({
       get().toast('User created', 'success')
       return
     }
-    const { createUser } = await import('./lib/api')
     try {
       await createUser(username, password, role)
       await get().refresh()
@@ -630,7 +669,6 @@ export const useApp = create<AppState>((set, get) => ({
       get().toast('User removed', 'success')
       return
     }
-    const { removeUser } = await import('./lib/api')
     try {
       await removeUser(id)
       await get().refresh()
@@ -646,7 +684,6 @@ export const useApp = create<AppState>((set, get) => ({
       get().toast('Team created', 'success')
       return
     }
-    const { createTeam } = await import('./lib/api')
     try {
       await createTeam(name)
       await get().refresh()
@@ -662,7 +699,6 @@ export const useApp = create<AppState>((set, get) => ({
       get().toast('Team removed', 'success')
       return
     }
-    const { removeTeam } = await import('./lib/api')
     try {
       await removeTeam(id)
       await get().refresh()
