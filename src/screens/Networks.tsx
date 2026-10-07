@@ -37,7 +37,7 @@ export function NetworksScreen() {
                 <>
                   {n.Internal && <Pill color="var(--text-faint)">internal</Pill>}
                   {removable(n.Driver) && (
-                    <button className="icon-btn" style={{ width: 32, height: 32 }} onClick={(e) => { e.stopPropagation(); setConfirmId(n.Id) }}>
+                    <button className="icon-btn" style={{ width: 32, height: 32 }} aria-label={`Remove ${n.Name}`} onClick={(e) => { e.stopPropagation(); setConfirmId(n.Id) }}>
                       <IconTrash size={15} />
                     </button>
                   )}

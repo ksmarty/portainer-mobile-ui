@@ -595,14 +595,6 @@ export function demoDanglingImages(): Image[] {
   return demoState.images.filter((i) => !i.RepoTags || i.RepoTags.length === 0 || i.RepoTags.includes('<none>:<none>'))
 }
 
-export function demoRecreateContainer(id: string) {
-  const c = demoState.containers.find((x) => x.Id === id)
-  if (!c) return
-  c.Image = (c.Image || 'demo/image').split(':')[0] + ':latest'
-  c.ImageID = 'sha256:' + 'b'.repeat(64)
-  c.Status = 'Up About a minute'
-}
-
 export function demoGetNetworkInfo(id: string): NetworkDetail {
   const n = demoState.networks.find((x) => x.Id === id) || demoState.networks[0]
   const base = n?.Name ? 100 + Math.abs(id.length * 7) : 172

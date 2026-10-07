@@ -31,7 +31,7 @@ export function VolumesScreen() {
               title={<span className="mono" style={{ fontSize: 13.5 }}>{v.Name}</span>}
               sub={`${v.Driver} · ${bytes(v.Size || 0)} · ${v.RefCount ?? 0} in use`}
               right={
-                <button className="icon-btn" style={{ width: 32, height: 32 }} onClick={(e) => { e.stopPropagation(); setConfirmName(v.Name) }}>
+                <button className="icon-btn" style={{ width: 32, height: 32 }} aria-label={`Remove ${v.Name}`} onClick={(e) => { e.stopPropagation(); setConfirmName(v.Name) }}>
                   <IconTrash size={15} />
                 </button>
               }

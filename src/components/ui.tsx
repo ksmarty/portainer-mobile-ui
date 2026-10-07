@@ -75,41 +75,34 @@ export function ListItem({
   danger?: boolean
   style?: React.CSSProperties
 }) {
-  const content = (
+  // The interactive part of the row is a real <button> so it stays keyboard
+  // accessible without nesting a button inside a role="button" element (rows
+  // may render their own action buttons in `right`).
+  const main = (
     <>
       {icon && <div className="item-icon">{icon}</div>}
       <div className="item-main">
         <div className="item-title">{title}</div>
         {sub && <div className="item-sub">{sub}</div>}
       </div>
+    </>
+  )
+
+  return (
+    <div className={`list-item ${danger ? 'danger' : ''}`} style={style}>
+      {onClick ? (
+        <button type="button" className="item-hit" onClick={onClick}>
+          {main}
+        </button>
+      ) : (
+        <div className="item-hit">{main}</div>
+      )}
       {right}
       {onClick && (
         <span className="chev">
           <IconChevronRight size={18} />
         </span>
       )}
-    </>
-  )
-
-  return (
-    <div
-      className={`list-item ${danger ? 'danger' : ''}`}
-      style={style}
-      role={onClick ? 'button' : undefined}
-      tabIndex={onClick ? 0 : undefined}
-      onClick={onClick}
-      onKeyDown={
-        onClick
-          ? (e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault()
-                onClick()
-              }
-            }
-          : undefined
-      }
-    >
-      {content}
     </div>
   )
 }

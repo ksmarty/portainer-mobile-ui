@@ -36,8 +36,12 @@ export function ContainerLogsScreen({ id }: { id: string }) {
   return (
     <div className="page">
       <div style={{ display: 'flex', gap: 8, margin: '14px 0 12px', alignItems: 'center' }}>
-        <button className={`btn sm ${following ? 'primary' : 'ghost'}`} onClick={() => setFollowing(!following)}>
-          <IconPlay size={14} /> {following ? 'Following' : 'Paused'}
+        <button
+          className={`btn sm ${following ? 'primary' : 'ghost'}`}
+          title={following ? 'Auto-scroll to new log lines' : 'Auto-scroll paused'}
+          onClick={() => setFollowing(!following)}
+        >
+          <IconPlay size={14} /> {following ? 'Auto-scroll' : 'Paused'}
         </button>
         <button className="btn sm ghost" onClick={() => void loadLogs(id, LOG_TAIL)}>
           <IconRefresh size={14} /> Reload

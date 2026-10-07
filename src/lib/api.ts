@@ -122,7 +122,10 @@ function apiBase(url: string): string {
   return /\/api$/i.test(u) ? u : `${u}/api`
 }
 
-async function portainerFetch<T>(path: string, options: RequestInit = {}, params?: Record<string, unknown>): Promise<T> {
+// Shared request plumbing: resolves the base URL, attaches auth headers and
+// normalizes network/HTTP errors. Returns the raw Response so streamed
+// endpoints (image pulls, builds) can read the body themselves.
+async function portainerRequest(path: string, options: RequestInit = {}, params?: Record<string, unknown>): Promise<Response> {
   const cfg = getConfig()
   if (!cfg.url) throw new ApiError('No Portainer URL configured. Add a connection in Settings.', 0)
   const base = apiBase(cfg.url)
@@ -173,6 +176,11 @@ async function portainerFetch<T>(path: string, options: RequestInit = {}, params
     }
     throw new ApiError(msg || `Request failed (${res.status})`, res.status)
   }
+  return res
+}
+
+async function portainerFetch<T>(path: string, options: RequestInit = {}, params?: Record<string, unknown>): Promise<T> {
+  const res = await portainerRequest(path, options, params)
   if (res.status === 204) return undefined as T
   const ct = res.headers.get('content-type') || ''
   if (ct.includes('application/json')) {
@@ -200,15 +208,6 @@ function dockerPath(endpointId: number, path: string): string {
 export function getEndpoints(): Promise<Endpoint[]> {
   if (isDemo()) return demoDelay(demoGet<Endpoint[]>('endpoints'))
   return portainerFetch<Endpoint[]>('/endpoints', undefined, { limit: 100, start: 0 })
-}
-
-export async function getEndpoint(id: number): Promise<Endpoint> {
-  if (isDemo()) return demoDelay(demoGet<Endpoint[]>('endpoints').find((e) => e.Id === id)!)
-  const key = cacheKey(`/endpoints/${id}`)
-  const cached = getCache<Endpoint>(key)
-  if (cached) return cached
-  const ep = await portainerFetch<Endpoint>('/endpoints/' + id)
-  return setCache(key, ep, 10000)
 }
 
 /* ------------------------------ dashboard -------------------------------- */
@@ -408,11 +407,18 @@ export function parseDockerLogs(raw: Uint8Array): LogLine[] {
 export function getContainerStats(endpointId: number, id: string): Promise<Stats> {
   if (isDemo()) return demoDelay(demoStats(), 250)
   return (async () => {
-    const raw = await portainerFetch<any>(dockerPath(endpointId, `/containers/${id}/stats`), {}, { stream: 0, 'one-shot': 1 })
-    const cpuDelta = raw.cpu_stats.cpu_usage.total_usage - raw.precpu_stats.cpu_usage.total_usage
-    const sysDelta = raw.cpu_stats.system_cpu_usage - raw.precpu_stats.system_cpu_usage
-    const cpus = raw.cpu_stats.online_cpus || 1
-    const cpuPercent = sysDelta > 0 ? (cpuDelta / sysDelta) * cpus * 100 : 0
+    const path = dockerPath(endpointId, `/containers/${id}/stats`)
+    const sample = () => portainerFetch<any>(path, {}, { stream: 0, 'one-shot': 1 })
+    // A single one-shot sample reports precpu_stats equal to cpu_stats (delta 0),
+    // so take two readings ~1.2s apart and diff them — same approach as
+    // getDashboard(), which would otherwise show a flat 0% CPU here.
+    const first = await sample()
+    await new Promise((r) => setTimeout(r, 1200))
+    const raw = await sample()
+    const cpuDelta = (raw.cpu_stats?.cpu_usage?.total_usage ?? 0) - (first.cpu_stats?.cpu_usage?.total_usage ?? 0)
+    const sysDelta = (raw.cpu_stats?.system_cpu_usage ?? 0) - (first.cpu_stats?.system_cpu_usage ?? 0)
+    const cpus = raw.cpu_stats?.online_cpus || first.cpu_stats?.online_cpus || 1
+    const cpuPercent = sysDelta > 0 && cpuDelta >= 0 ? (cpuDelta / sysDelta) * cpus * 100 : 0
     // Docker counts page cache in `usage`; subtract it like `docker stats` does.
     const memUsage = Math.max(0, (raw.memory_stats?.usage ?? 0) - (raw.memory_stats?.stats?.cache ?? 0))
     const memLimit = raw.memory_stats?.limit ?? 0
@@ -460,20 +466,73 @@ export function removeImage(endpointId: number, id: string, force = false): Prom
   return portainerFetch<void>(dockerPath(endpointId, `/images/${id}`), { method: 'DELETE' }, { force, noprune: 0 })
 }
 
-export function pullImage(endpointId: number, image: string): Promise<void> {
+export interface PullResult {
+  /** Image reference that was pulled. */
+  image: string
+  /** Docker reported the tag already pointed at the newest image. */
+  upToDate: boolean
+  /** Terminal "Status:" progress line from Docker, when present. */
+  status: string
+  /** Content digest Docker reported, when present. */
+  digest?: string
+}
+
+// Docker streams newline-delimited JSON progress events for a pull. Mine the
+// stream for the terminal status so callers can tell the user whether anything
+// actually changed and which version came down.
+function parsePullResult(image: string, text: string): PullResult {
+  const errMatch = text.match(/"error"\s*:\s*"((?:[^"\\]|\\.)*)"/)
+  if (errMatch) {
+    let msg = errMatch[1]
+    try {
+      msg = JSON.parse('"' + errMatch[1] + '"')
+    } catch {}
+    throw new ApiError(msg, 0)
+  }
+  const statuses: string[] = []
+  const re = /"status"\s*:\s*"((?:[^"\\]|\\.)*)"/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text))) {
+    let s = m[1]
+    try {
+      s = JSON.parse('"' + m[1] + '"')
+    } catch {}
+    statuses.push(s)
+  }
+  const finalStatus =
+    [...statuses].reverse().find((s) => s.startsWith('Status:')) || statuses[statuses.length - 1] || ''
+  const digest = text.match(/sha256:[0-9a-f]{12,}/i)?.[0]
+  return {
+    image,
+    upToDate: /image is up to date/i.test(text),
+    status: finalStatus,
+    digest,
+  }
+}
+
+export async function pullImage(endpointId: number, image: string): Promise<PullResult> {
+  const ref = image.trim()
   if (isDemo()) {
-    demoPullImage(image)
-    return demoDelay(undefined, 700)
+    demoPullImage(ref)
+    await demoDelay(undefined, 700)
+    return {
+      image: ref,
+      upToDate: false,
+      status: `Status: Downloaded newer image for ${ref}`,
+      digest: 'sha256:000000000000',
+    }
   }
   // Match Portainer's own frontend exactly: POST /images/create with the full
   // image reference in fromImage and NO separate tag param — some Portainer
   // versions reject the tag param combination.
   // Large image pulls can take longer than the default 30s timeout, so give it 5 minutes.
-  return portainerFetch<void>(
+  const res = await portainerRequest(
     '/endpoints/' + endpointId + '/docker/images/create',
     { method: 'POST', signal: AbortSignal.timeout(300000) },
-    { fromImage: image.trim() },
+    { fromImage: ref },
   )
+  const text = await res.text().catch(() => '')
+  return parsePullResult(ref, text)
 }
 
 // Detailed metadata for one network (docker inspect).

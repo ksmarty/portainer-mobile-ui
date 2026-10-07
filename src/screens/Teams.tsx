@@ -30,7 +30,7 @@ export function TeamsScreen() {
               title={t.Name}
               sub="Team"
               right={
-                <button className="icon-btn" style={{ width: 32, height: 32 }} onClick={(e) => { e.stopPropagation(); setConfirmId(t.Id) }}>
+                <button className="icon-btn" style={{ width: 32, height: 32 }} aria-label={`Remove ${t.Name}`} onClick={(e) => { e.stopPropagation(); setConfirmId(t.Id) }}>
                   <IconTrash size={15} />
                 </button>
               }

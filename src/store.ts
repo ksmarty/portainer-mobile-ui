@@ -38,6 +38,7 @@ import {
   testConnection,
   updateStack,
 } from './lib/api'
+import type { PullResult } from './lib/api'
 import { extractComposeImages } from './lib/compose'
 import { demoAddEndpoint, demoAddTeam, demoAddUser, demoRemoveTeam, demoRemoveUser } from './lib/demo'
 import type {
@@ -144,6 +145,16 @@ function endpointId(state: AppState): number {
   return state.activeEndpoint || state.endpoints[0]?.Id || 1
 }
 
+// Turn a completed pull into a toast: either confirm the tag was already the
+// newest, or report the version that came down (with a short digest).
+function pullToast(r: PullResult): { message: string; kind: 'success' | 'info' } {
+  if (r.upToDate) {
+    return { message: `${r.image} is already the latest version`, kind: 'info' }
+  }
+  const d = r.digest ? ` · ${r.digest.replace(/^sha256:/, '').slice(0, 12)}` : ''
+  return { message: `Fetched ${r.image}${d}`, kind: 'success' }
+}
+
 export const useApp = create<AppState>((set, get) => ({
   ready: false,
   booting: false,
@@ -224,8 +235,8 @@ export const useApp = create<AppState>((set, get) => ({
               getVolumes(active),
               getNetworks(active),
               getStacks(),
-              getSettings(),
               // Admin-only endpoints — don't fail the whole boot for a non-admin key.
+              getSettings().catch(() => null),
               getUsers().catch(() => [] as User[]),
               getTeams().catch(() => [] as Team[]),
               getRegistries().catch(() => [] as Registry[]),
@@ -361,9 +372,13 @@ export const useApp = create<AppState>((set, get) => ({
     set({ activeEndpoint: id, loading: true, error: null })
     Promise.all([getContainers(id), getImages(id), getVolumes(id), getNetworks(id)])
       .then(([containers, images, volumes, networks]) => {
+        // A newer switch may have started while this one was loading — don't
+        // let the older response clobber the endpoint the user is now on.
+        if (get().activeEndpoint !== id) return
         set({ containers, images, volumes, networks, loading: false, screen: { name: 'containers', title: 'Containers' } })
       })
       .catch((e) => {
+        if (get().activeEndpoint !== id) return
         set({ loading: false, error: (e as Error).message })
         get().toast('Could not switch endpoint: ' + (e as Error).message, 'error')
       })
@@ -410,7 +425,7 @@ export const useApp = create<AppState>((set, get) => ({
           getVolumes(id),
           getNetworks(id),
           getStacks(),
-          getSettings(),
+          getSettings().catch(() => get().settings),
           getUsers().catch(() => [] as User[]),
           getTeams().catch(() => [] as Team[]),
           getRegistries().catch(() => [] as Registry[]),
@@ -464,8 +479,8 @@ export const useApp = create<AppState>((set, get) => ({
     const c = get().containers.find((x) => x.Id === id)
     if (!c) return
     try {
-      await pullImage(ep, c.Image || '')
-      get().toast(`Pulled ${c.Image}`, 'success')
+      const t = pullToast(await pullImage(ep, c.Image || ''))
+      get().toast(t.message, t.kind)
       await get().refresh()
     } catch (e) {
       get().toast((e as Error).message, 'error')
@@ -487,8 +502,8 @@ export const useApp = create<AppState>((set, get) => ({
   doPullImage: async (image) => {
     const ep = endpointId(get())
     try {
-      await pullImage(ep, image)
-      get().toast('Image pulled', 'success')
+      const t = pullToast(await pullImage(ep, image))
+      get().toast(t.message, t.kind)
       await get().refresh()
     } catch (e) {
       get().toast((e as Error).message, 'error')
@@ -596,10 +611,19 @@ export const useApp = create<AppState>((set, get) => ({
         get().toast('No images found in this stack', 'info')
         return
       }
+      const results: PullResult[] = []
       for (const image of images) {
-        await pullImage(ep, image)
+        results.push(await pullImage(ep, image))
       }
-      get().toast(`Pulled ${images.length} image${images.length === 1 ? '' : 's'}`, 'success')
+      const upToDate = results.filter((r) => r.upToDate).length
+      const updated = results.length - upToDate
+      const noun = results.length === 1 ? 'image' : 'images'
+      if (updated === 0) {
+        get().toast(`All ${results.length} ${noun} already up to date`, 'info')
+      } else {
+        const extra = upToDate ? `, ${upToDate} already up to date` : ''
+        get().toast(`Updated ${updated} of ${results.length} ${noun}${extra}`, 'success')
+      }
       await updateStack(id, ep, file, stack?.Env || [])
       get().toast('Stack updated', 'success')
       await get().refresh()

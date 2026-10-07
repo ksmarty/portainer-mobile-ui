@@ -35,7 +35,7 @@ export function UsersScreen() {
                 <>
                   {u.Role === 1 && <Pill color="var(--purple)">admin</Pill>}
                   {u.Username !== 'admin' && (
-                    <button className="icon-btn" style={{ width: 32, height: 32 }} onClick={(e) => { e.stopPropagation(); setConfirmId(u.Id) }}>
+                    <button className="icon-btn" style={{ width: 32, height: 32 }} aria-label={`Remove ${u.Username}`} onClick={(e) => { e.stopPropagation(); setConfirmId(u.Id) }}>
                       <IconTrash size={15} />
                     </button>
                   )}

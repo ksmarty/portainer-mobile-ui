@@ -340,6 +340,22 @@ a {
   border-color: var(--red);
 }
 
+/* The clickable area of a row. Rendered as a <button> (or a plain div when the
+   row isn't interactive) so action buttons in `right` are never nested inside
+   another interactive element. */
+.item-hit {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
 .item-icon {
   width: 32px;
   height: 32px;
