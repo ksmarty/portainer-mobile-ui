@@ -72,19 +72,14 @@ function stringifyDoc(doc: unknown): string {
   return stringify(doc, { indent: 2, lineWidth: 0, defaultStringType: 'PLAIN', defaultKeyType: 'PLAIN' })
 }
 
-/**
- * Every distinct `image:` reference declared in a compose file, with stack env
- * variables interpolated the same way `docker compose` would (e.g.
- * `${REGISTRY}/app:${TAG}`). Used by "pull latest images for this stack".
- */
-export function extractComposeImages(
-  input: string,
-  env: { name: string; value: string }[] = [],
-): string[] {
+type ComposeEnv = { name: string; value: string }[]
+
+// `docker compose`-style variable expansion: ${VAR}, ${VAR:-default},
+// ${VAR-default}, ${VAR:?err}, ${VAR?err} — resolved against the stack env.
+function composeInterpolate(env: ComposeEnv = []): (value: string) => string {
   const vars = new Map(env.map((e) => [e.name, e.value]))
-  const interpolate = (value: string) =>
+  return (value: string) =>
     value
-      // ${VAR:-default} / ${VAR-default} / ${VAR:?err} / ${VAR?err}
       .replace(
         /\$\{([A-Za-z_][A-Za-z0-9_]*)(:?[-?])([^}]*)\}/g,
         (_, key: string, op: string, arg: string) => {
@@ -95,22 +90,45 @@ export function extractComposeImages(
       )
       .replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, key: string) => vars.get(key) ?? '')
       .replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_, key: string) => vars.get(key) ?? '')
+}
 
+function composeServices(input: string): Record<string, unknown> {
   let doc: unknown
   try {
     doc = parse(input)
   } catch {
-    return []
+    return {}
   }
-  if (!isPlainObject(doc) || !isPlainObject(doc.services)) return []
+  if (!isPlainObject(doc) || !isPlainObject(doc.services)) return {}
+  return doc.services
+}
 
+/**
+ * Every distinct `image:` reference declared in a compose file, with stack env
+ * variables interpolated the same way `docker compose` would (e.g.
+ * `${REGISTRY}/app:${TAG}`). Used by "pull latest images for this stack".
+ */
+export function extractComposeImages(input: string, env: ComposeEnv = []): string[] {
+  const interpolate = composeInterpolate(env)
   const seen = new Set<string>()
-  for (const svc of Object.values(doc.services)) {
+  for (const svc of Object.values(composeServices(input))) {
     if (!isPlainObject(svc) || typeof svc.image !== 'string') continue
     const image = interpolate(svc.image).trim()
     if (image) seen.add(image)
   }
   return [...seen]
+}
+
+/**
+ * The image one service declares in a compose file. This is how a container's
+ * real tag is recovered when Docker only reports an image id for it and the
+ * local image has already lost its tag to a newer pull.
+ */
+export function composeImageForService(input: string, service: string, env: ComposeEnv = []): string | null {
+  const svc = composeServices(input)[service]
+  if (!isPlainObject(svc) || typeof svc.image !== 'string') return null
+  const image = composeInterpolate(env)(svc.image).trim()
+  return image || null
 }
 
 /**

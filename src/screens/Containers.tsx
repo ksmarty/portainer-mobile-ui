@@ -3,10 +3,13 @@ import { useApp } from '../store'
 import { IconBox, IconPlus, IconSearch } from '../components/Icons'
 import { Empty, ListItem, Pill, Skeleton } from '../components/ui'
 import { portLabel, stateColor, stateLabel } from '../lib/utils'
+import { containerImageLabel, containerImageState } from '../lib/containerRefs'
+import type { ImageState } from '../lib/containerRefs'
 import type { Container } from '../lib/types'
 
 export function ContainersScreen() {
   const containers = useApp((s) => s.containers)
+  const images = useApp((s) => s.images)
   const loading = useApp((s) => s.loading)
   const navigate = useApp((s) => s.navigate)
   const [filter, setFilter] = useState<'all' | 'running' | 'stopped'>('all')
@@ -18,10 +21,17 @@ export function ContainersScreen() {
     if (filter === 'stopped') list = list.filter((c) => c.State !== 'running')
     if (query.trim()) {
       const q = query.toLowerCase()
-      list = list.filter((c) => c.Names.some((n) => n.toLowerCase().includes(q)) || c.Image.toLowerCase().includes(q))
+      // Match the resolved image tag as well: a container updated in place
+      // reports its image as a bare id, which would never match a tag search.
+      list = list.filter(
+        (c) =>
+          c.Names.some((n) => n.toLowerCase().includes(q)) ||
+          c.Image.toLowerCase().includes(q) ||
+          containerImageLabel(c, images).toLowerCase().includes(q),
+      )
     }
     return list
-  }, [containers, filter, query])
+  }, [containers, images, filter, query])
 
   return (
     <div className="page">
@@ -58,7 +68,13 @@ export function ContainersScreen() {
       ) : (
         <div className="card-list">
           {filtered.map((c) => (
-            <ContainerRow key={c.Id} c={c} onClick={() => navigate({ name: 'container-detail', title: c.Names[0]?.replace('/', ''), props: { id: c.Id } })} />
+            <ContainerRow
+              key={c.Id}
+              c={c}
+              label={containerImageLabel(c, images)}
+              imgState={containerImageState(c, images)}
+              onClick={() => navigate({ name: 'container-detail', title: c.Names[0]?.replace('/', ''), props: { id: c.Id } })}
+            />
           ))}
           {!filtered.length && (
             <Empty
@@ -75,7 +91,7 @@ export function ContainersScreen() {
   )
 }
 
-function ContainerRow({ c, onClick }: { c: Container; onClick: () => void }) {
+function ContainerRow({ c, label, imgState, onClick }: { c: Container; label: string; imgState: ImageState; onClick: () => void }) {
   const color = stateColor(c.State)
   return (
     <ListItem
@@ -85,10 +101,15 @@ function ContainerRow({ c, onClick }: { c: Container; onClick: () => void }) {
           <IconBox size={20} />
         </div>
       }
-      title={<>{c.Names[0]?.replace('/', '')}</>}
+      title={
+        <>
+          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.Names[0]?.replace('/', '')}</span>
+          {imgState === 'stale' && <Pill color="var(--amber)">update</Pill>}
+        </>
+      }
       sub={
         <>
-          <span className="mono" style={{ color: 'var(--text-dim)' }}>{c.Image}</span>
+          <span className="mono" style={{ color: 'var(--text-dim)' }}>{label}</span>
           <span style={{ margin: '0 6px', color: 'var(--text-faint)' }}>·</span>
           {portLabel(c.Ports)}
         </>

@@ -16,23 +16,10 @@ import {
 } from '../components/Icons'
 import { Empty, KV, ListItem, Pill, SectionTitle, Spinner } from '../components/ui'
 import { copyText, portLabel, stateColor, stateLabel, timeAgo } from '../lib/utils'
-import type { Container, Image } from '../lib/types'
+import type { Container } from '../lib/types'
+import { containerImageLabel, containerImageState } from '../lib/containerRefs'
+import type { ImageState } from '../lib/containerRefs'
 import { ConfirmModal } from '../components/ConfirmModal'
-
-type ImageState = 'current' | 'stale' | 'unknown'
-
-// A container is "up to date" when the image it was created from still matches
-// the locally stored image for its tag. If the tag now points at a different
-// image id, a newer image has been pulled and the container needs recreating.
-function imageState(c: Container, images: Image[]): ImageState {
-  if (!c.Image) return 'unknown'
-  const img = images.find((i) => i.RepoTags?.includes(c.Image!))
-  if (!img) return 'unknown'
-  const local = (img.Id || '').replace(/^sha256:/, '')
-  const used = (c.ImageID || '').replace(/^sha256:/, '')
-  if (!local || !used) return 'unknown'
-  return local === used ? 'current' : 'stale'
-}
 
 export function StackDetailScreen({ id, fileOverride }: { id: number; fileOverride?: string }) {
   const stacks = useApp((s) => s.stacks)
@@ -70,7 +57,7 @@ export function StackDetailScreen({ id, fileOverride }: { id: number; fileOverri
   if (!stack && !fileOverride) return null
 
   const file = fileOverride ?? null
-  const staleCount = stackContainers.filter((c) => imageState(c, images) === 'stale').length
+  const staleCount = stackContainers.filter((c) => containerImageState(c, images) === 'stale').length
 
   const pullLatestImages = async () => {
     setPulling(true)
@@ -149,7 +136,8 @@ export function StackDetailScreen({ id, fileOverride }: { id: number; fileOverri
               <StackContainerRow
                 key={c.Id}
                 c={c}
-                imgState={imageState(c, images)}
+                label={containerImageLabel(c, images)}
+                imgState={containerImageState(c, images)}
                 onClick={() => navigate({ name: 'container-detail', title: c.Names[0]?.replace('/', ''), props: { id: c.Id } })}
               />
             ))}
@@ -259,7 +247,7 @@ function EnvValueModal({ name, value, onClose }: { name: string; value: string; 
   )
 }
 
-function StackContainerRow({ c, imgState, onClick }: { c: Container; imgState: ImageState; onClick: () => void }) {
+function StackContainerRow({ c, label, imgState, onClick }: { c: Container; label: string; imgState: ImageState; onClick: () => void }) {
   const color = stateColor(c.State)
   return (
     <div className="list-item" onClick={onClick} role="button" tabIndex={0}
@@ -275,7 +263,7 @@ function StackContainerRow({ c, imgState, onClick }: { c: Container; imgState: I
           {imgState === 'stale' && <Pill color="var(--amber)">update available</Pill>}
         </div>
         <div className="item-sub">
-          <span className="mono">{c.Image}</span>
+          <span className="mono">{label}</span>
           <span style={{ margin: '0 5px', color: 'var(--text-faint)' }}>·</span>
           {portLabel(c.Ports)}
         </div>

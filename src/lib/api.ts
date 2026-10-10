@@ -8,6 +8,7 @@ import {
   demoGetImageInfo,
   demoGetNetworkInfo,
   demoPullImage,
+  demoRecreateContainer,
   demoRemoveContainer,
   demoRemoveImage,
   demoRemoveNetwork,
@@ -349,6 +350,96 @@ export function createContainer(endpointId: number, name: string, image: string)
     { method: 'POST', body: JSON.stringify({ Image: image }) },
     { name },
   )
+}
+
+// Shape of `GET /containers/{id}/json` (only the parts recreate needs).
+interface ContainerInspect {
+  Id: string
+  Name?: string
+  Config?: Record<string, any>
+  HostConfig?: Record<string, any>
+  NetworkingConfig?: { EndpointsConfig?: Record<string, any> }
+  State?: { Running?: boolean }
+}
+
+export function inspectContainer(endpointId: number, id: string): Promise<ContainerInspect> {
+  return portainerFetch<ContainerInspect>(dockerPath(endpointId, `/containers/${id}/json`))
+}
+
+/**
+ * Rebuild a container in place so it runs `image`, keeping its configuration
+ * (env, ports, mounts, networks, restart policy, labels). Docker has no atomic
+ * recreate, so this is the same dance Portainer does: stop it, rename it out
+ * of the way, create a replacement from the inspected config with the new
+ * image, start that, then remove the old one.
+ *
+ * If anything fails after the rename we put the original container back
+ * (rename + restart), so an interrupted update can't leave the user with a
+ * renamed, stopped container and no replacement.
+ */
+export async function recreateContainer(endpointId: number, id: string, image: string): Promise<void> {
+  if (isDemo()) {
+    demoRecreateContainer(id, image)
+    return demoDelay(undefined, 500)
+  }
+  const inspect = await inspectContainer(endpointId, id)
+  const name = (inspect.Name || '').replace(/^\//, '') || inspect.Id.slice(0, 12)
+  const backup = `${name}-old-${Date.now().toString(36)}`
+  const wasRunning = !!inspect.State?.Running
+
+  // Rebuild the create body from the inspect output. Config/HostConfig are
+  // accepted by /containers/create almost verbatim (that is what makes the
+  // recreate faithful); only the new image is swapped in.
+  const body: Record<string, any> = {
+    ...(inspect.Config || {}),
+    Image: image,
+    HostConfig: inspect.HostConfig || {},
+  }
+  delete body.ImageID
+  delete body.Created
+  delete body.State
+  delete body.Config
+  const networking = inspect.NetworkingConfig ? jsonClone(inspect.NetworkingConfig) : undefined
+  if (networking?.EndpointsConfig) {
+    for (const epConf of Object.values<any>(networking.EndpointsConfig)) {
+      // The old container still exists and holds any static IP, so Docker
+      // would reject the create with "address already in use". Leave the
+      // interface without an address and let Docker assign one.
+      if (epConf?.IPAMConfig) delete epConf.IPAMConfig.IPv4Address
+    }
+    body.NetworkingConfig = networking
+  }
+
+  let renamed = false
+  let createdId = ''
+  try {
+    if (wasRunning) {
+      // 304 (already stopped) is a normal answer here, not an error.
+      await portainerFetch<void>(dockerPath(endpointId, `/containers/${id}/stop`), { method: 'POST' }, { t: 10 }).catch(() => {})
+    }
+    await portainerFetch<void>(dockerPath(endpointId, `/containers/${id}/rename`), { method: 'POST' }, { name: backup })
+    renamed = true
+    const created = await portainerFetch<{ Id: string }>(
+      dockerPath(endpointId, '/containers/create'),
+      { method: 'POST', body: JSON.stringify(body) },
+      { name },
+    )
+    createdId = created?.Id || ''
+    await portainerFetch<void>(dockerPath(endpointId, `/containers/${createdId}/start`), { method: 'POST' })
+    // v=0: keep anonymous volumes — an update must not look like a reset.
+    await portainerFetch<void>(dockerPath(endpointId, `/containers/${id}`), { method: 'DELETE' }, { force: 1, v: 0 })
+  } catch (e) {
+    if (createdId) {
+      await portainerFetch<void>(dockerPath(endpointId, `/containers/${createdId}`), { method: 'DELETE' }, { force: 1, v: 0 }).catch(() => {})
+    }
+    if (renamed) {
+      await portainerFetch<void>(dockerPath(endpointId, `/containers/${id}/rename`), { method: 'POST' }, { name }).catch(() => {})
+      if (wasRunning) {
+        await portainerFetch<void>(dockerPath(endpointId, `/containers/${id}/start`), { method: 'POST' }).catch(() => {})
+      }
+    }
+    throw e
+  }
 }
 
 export function getContainerLogs(endpointId: number, id: string, tail = 100): Promise<LogLine[]> {

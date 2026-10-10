@@ -25,6 +25,7 @@ import {
   getVolumes,
   isDemo,
   pullImage,
+  recreateContainer,
   removeContainer,
   removeImage,
   removeNetwork,
@@ -39,7 +40,8 @@ import {
   updateStack,
 } from './lib/api'
 import type { PullResult } from './lib/api'
-import { extractComposeImages } from './lib/compose'
+import { extractComposeImages, composeImageForService } from './lib/compose'
+import { resolveContainerImage, stackForContainer } from './lib/containerRefs'
 import { demoAddEndpoint, demoAddTeam, demoAddUser, demoRemoveTeam, demoRemoveUser } from './lib/demo'
 import type {
   Container,
@@ -117,6 +119,7 @@ interface AppState {
   doContainerAction: (id: string, action: string) => Promise<void>
   doRemoveContainer: (id: string) => Promise<void>
   doFetchNewImage: (id: string) => Promise<void>
+  doUpdateContainer: (id: string, onProgress?: (step: string) => void) => Promise<void>
   doCreateContainer: (name: string, image: string) => Promise<void>
   doPullImage: (image: string) => Promise<void>
   doRemoveImage: (id: string) => Promise<void>
@@ -153,6 +156,26 @@ function pullToast(r: PullResult): { message: string; kind: 'success' | 'info' }
   }
   const d = r.digest ? ` · ${r.digest.replace(/^sha256:/, '').slice(0, 12)}` : ''
   return { message: `Fetched ${r.image}${d}`, kind: 'success' }
+}
+
+// Some containers report their image as a bare id, and once a newer image has
+// been pulled for the tag that id can be left with no tag at all. The owning
+// stack's compose file still names the image for the service, so read it as a
+// last resort — without this, those containers can never be updated again.
+async function stackImageRef(c: Container, stack: Stack | undefined): Promise<string | null> {
+  const service = c.Labels?.['com.docker.compose.service']
+  if (!stack || !service) return null
+  try {
+    const file = await getStackFile(stack.Id)
+    return composeImageForService(file, service, stack.Env || [])
+  } catch {
+    return null
+  }
+}
+
+// The best pullable reference we can find for a container's image.
+async function pullRefFor(c: Container, stack: Stack | undefined, images: Image[]): Promise<string | null> {
+  return resolveContainerImage(c, images) || (await stackImageRef(c, stack))
 }
 
 export const useApp = create<AppState>((set, get) => ({
@@ -478,12 +501,52 @@ export const useApp = create<AppState>((set, get) => ({
     const ep = endpointId(get())
     const c = get().containers.find((x) => x.Id === id)
     if (!c) return
+    // A container can report its image as a bare id after an update — that is
+    // not a pullable reference, so resolve the real tag first.
+    const ref = await pullRefFor(c, stackForContainer(c, get().stacks), get().images)
+    if (!ref) {
+      get().toast(`No image tag found for ${c.Image || 'this container'} — it may no longer exist on the host`, 'error')
+      return
+    }
     try {
-      const t = pullToast(await pullImage(ep, c.Image || ''))
+      const t = pullToast(await pullImage(ep, ref))
       get().toast(t.message, t.kind)
       await get().refresh()
     } catch (e) {
       get().toast((e as Error).message, 'error')
+    }
+  },
+
+  // Container-scoped "pull latest and update": pull this container's image,
+  // then apply it — re-deploying the stack the container belongs to, or
+  // recreating the container when it stands alone.
+  doUpdateContainer: async (id, onProgress) => {
+    const c = get().containers.find((x) => x.Id === id)
+    if (!c) return
+    const ep = endpointId(get())
+    const stack = stackForContainer(c, get().stacks)
+    try {
+      const ref = await pullRefFor(c, stack, get().images)
+      if (!ref) {
+        throw new Error(`No image tag found for ${c.Image || 'this container'} — it may no longer exist on the host`)
+      }
+      onProgress?.(`Pulling ${ref}…`)
+      const t = pullToast(await pullImage(ep, ref))
+      get().toast(t.message, t.kind)
+      if (stack) {
+        onProgress?.(`Redeploying stack ${stack.Name}…`)
+        const file = await getStackFile(stack.Id)
+        await updateStack(stack.Id, stack.EndpointId ?? ep, file, stack.Env || [])
+        get().toast(`Stack ${stack.Name} updated`, 'success')
+      } else {
+        onProgress?.('Recreating container…')
+        await recreateContainer(ep, id, ref)
+        get().toast('Container updated', 'success')
+      }
+      await get().refresh()
+    } catch (e) {
+      get().toast((e as Error).message, 'error')
+      throw e
     }
   },
 

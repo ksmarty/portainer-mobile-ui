@@ -571,6 +571,28 @@ export function demoRemoveContainer(id: string) {
   demoState.containers = demoState.containers.filter((c) => c.Id !== id)
 }
 
+// Mirror of the real recreate: the container keeps everything except its image,
+// and the tag it runs now points at a freshly pulled image id so the UI doesn't
+// report it as stale any more.
+export function demoRecreateContainer(id: string, image: string) {
+  const c = demoState.containers.find((x) => x.Id === id)
+  if (!c) return
+  const oldId = c.ImageID
+  const newId = 'sha256:' + uid('img').slice(-8) + '...new'
+  const img = demoState.images.find((i) => i.RepoTags?.includes(image)) || demoState.images.find((i) => i.Id === oldId)
+  if (img) {
+    // A re-deployed container runs the same image object the tag points at, so
+    // move that image to a new id and leave the superseded one dangling — the
+    // same way a pull + recreate leaves the old image behind.
+    img.Id = newId
+  }
+  c.Image = image
+  c.ImageID = newId
+  c.Created = Math.floor(Date.now() / 1000)
+  if (c.State === 'running') c.Status = 'Up Less than a second'
+  else if (c.State === 'exited') c.Status = 'Exited (0) Less than a second ago'
+}
+
 export function demoCreateContainer(name: string, image: string) {
   demoState.containers.unshift({
     Id: uid('c'),

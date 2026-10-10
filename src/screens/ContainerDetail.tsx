@@ -8,6 +8,7 @@ import {
   IconNetwork,
   IconPause,
   IconPlay,
+  IconRefresh,
   IconRestart,
   IconStop,
   IconTerminal,
@@ -16,20 +17,27 @@ import {
 import { KV, ListItem, Pill, SectionTitle, Spinner } from '../components/ui'
 import { bytes, shortId, stateColor, stateLabel, timeAgo } from '../lib/utils'
 import { getImageInfo } from '../lib/api'
+import { containerImageLabel, isImageId, stackForContainer } from '../lib/containerRefs'
 import type { ImageInfo } from '../lib/types'
 
 export function ContainerDetailScreen({ id }: { id: string }) {
   const containers = useApp((s) => s.containers)
+  const images = useApp((s) => s.images)
+  const stacks = useApp((s) => s.stacks)
   const networks = useApp((s) => s.networks)
   const doContainerAction = useApp((s) => s.doContainerAction)
   const doRemoveContainer = useApp((s) => s.doRemoveContainer)
   const doFetchNewImage = useApp((s) => s.doFetchNewImage)
+  const doUpdateContainer = useApp((s) => s.doUpdateContainer)
   const navigate = useApp((s) => s.navigate)
   const back = useApp((s) => s.back)
   const ep = useApp((s) => s.activeEndpoint || s.endpoints[0]?.Id || 1)
   const [confirmRemove, setConfirmRemove] = useState(false)
   const [confirmFetch, setConfirmFetch] = useState(false)
   const [fetchBusy, setFetchBusy] = useState(false)
+  const [confirmUpdate, setConfirmUpdate] = useState(false)
+  const [updateBusy, setUpdateBusy] = useState(false)
+  const [updateStep, setUpdateStep] = useState('')
   const [showImageInfo, setShowImageInfo] = useState(false)
 
   const c = useMemo(() => containers.find((x) => x.Id === id), [containers, id])
@@ -42,6 +50,9 @@ export function ContainerDetailScreen({ id }: { id: string }) {
 
   const color = stateColor(c.State)
   const name = c.Names[0]?.replace('/', '')
+  const imgLabel = containerImageLabel(c, images)
+  const imgFromId = isImageId(c.Image)
+  const stack = stackForContainer(c, stacks)
 
   const quickActions = [
     c.State === 'running'
@@ -101,11 +112,16 @@ export function ContainerDetailScreen({ id }: { id: string }) {
               <span className="ico"><IconTrash size={19} /></span>
               Remove
             </button>
+            <button className="qa" onClick={() => { setUpdateStep(''); setConfirmUpdate(true) }}>
+              <span className="ico" style={{ background: 'var(--blue-soft)', color: 'var(--blue)' }}><IconRefresh size={19} /></span>
+              Update
+            </button>
           </div>
 
           <div className="divider" style={{ margin: '6px 0 12px' }} />
 
-          <KV k="Image" v={c.Image} mono />
+          <KV k="Image" v={imgLabel} mono />
+          {imgFromId && <KV k="Image ID" v={shortId(c.ImageID, 20)} mono />}
           <KV k="Status" v={c.Status} />
           <KV k="Created" v={timeAgo(c.Created)} />
           <KV k="Command" v={c.Command || '—'} mono />
@@ -193,7 +209,7 @@ export function ContainerDetailScreen({ id }: { id: string }) {
       )}
       {confirmFetch && (
         <FetchNewImageConfirm
-          name={c.Image}
+          name={imgLabel}
           busy={fetchBusy}
           onCancel={() => setConfirmFetch(false)}
           onConfirm={() => {
@@ -205,11 +221,31 @@ export function ContainerDetailScreen({ id }: { id: string }) {
           }}
         />
       )}
+      {confirmUpdate && (
+        <UpdateConfirm
+          name={name}
+          image={imgLabel}
+          stackName={stack?.Name}
+          busy={updateBusy}
+          step={updateStep}
+          onCancel={() => setConfirmUpdate(false)}
+          onConfirm={() => {
+            setUpdateBusy(true)
+            setUpdateStep('')
+            void doUpdateContainer(id, setUpdateStep)
+              .catch(() => {})
+              .finally(() => {
+                setUpdateBusy(false)
+                setConfirmUpdate(false)
+              })
+          }}
+        />
+      )}
       {showImageInfo && (
         <ImageInfoSheet
           ep={ep}
           imageId={c.ImageID}
-          imageRef={c.Image}
+          imageRef={imgLabel}
           onClose={() => setShowImageInfo(false)}
         />
       )}
@@ -259,6 +295,61 @@ function FetchNewImageConfirm({
           </button>
           <button className="btn primary" disabled={busy} onClick={onConfirm}>
             {busy ? <Spinner size={15} /> : 'Pull image'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function UpdateConfirm({
+  name,
+  image,
+  stackName,
+  busy,
+  step,
+  onCancel,
+  onConfirm,
+}: {
+  name: string
+  image: string
+  stackName?: string
+  busy: boolean
+  step: string
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <div className="overlay overlay-center">
+      <div className="modal">
+        <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>Update {name}?</div>
+        <p style={{ color: 'var(--text-dim)', fontSize: 14, margin: '0 0 12px' }}>
+          Pulls the latest <span className="mono">{image}</span>, then{' '}
+          {stackName ? (
+            <>
+              re-deploys stack <span className="mono">{stackName}</span> so its containers start on the new image.
+            </>
+          ) : (
+            <>recreates this container with the same settings so it starts on the new image.</>
+          )}
+        </p>
+        {!stackName && (
+          <p style={{ color: 'var(--text-faint)', fontSize: 12.5, margin: '0 0 12px' }}>
+            The container is recreated, so it gets a new id and a short outage while it restarts.
+          </p>
+        )}
+        {busy && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, margin: '0 0 14px' }}>
+            <Spinner size={15} />
+            <span style={{ color: 'var(--text-dim)', fontSize: 13 }}>{step || 'Working…'}</span>
+          </div>
+        )}
+        <div className="btn-row">
+          <button className="btn ghost" disabled={busy} onClick={onCancel}>
+            Cancel
+          </button>
+          <button className="btn primary" disabled={busy} onClick={onConfirm}>
+            {busy ? <Spinner size={15} /> : 'Pull & update'}
           </button>
         </div>
       </div>
