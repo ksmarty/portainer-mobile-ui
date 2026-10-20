@@ -198,6 +198,15 @@ export const IconMemory = (p: IconProps) => (
   </Svg>
 )
 
+export const IconDrive = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="2" y="4" width="20" height="7" rx="2" />
+    <rect x="2" y="13" width="20" height="7" rx="2" />
+    <path d="M6 7.5h.01M6 16.5h.01" />
+    <path d="M10 7.5h6M10 16.5h6" />
+  </Svg>
+)
+
 export const IconFile = (p: IconProps) => (
   <Svg {...p}>
     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />

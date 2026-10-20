@@ -14,6 +14,7 @@ import { StacksScreen } from './screens/Stacks'
 import { StackDetailScreen } from './screens/StackDetail'
 import { StackEditorScreen } from './screens/StackEditor'
 import { VolumesScreen } from './screens/Volumes'
+import { DrivesScreen } from './screens/Drives'
 import { NetworksScreen } from './screens/Networks'
 import { NetworkDetailScreen } from './screens/NetworkDetail'
 import { EndpointsScreen } from './screens/Endpoints'
@@ -40,6 +41,21 @@ export default function App() {
   useEffect(() => {
     void boot()
   }, [boot])
+
+  // An image cleanup runs in the store and is mirrored to localStorage after
+  // every image. On boot (i.e. after a reload) pick a persisted job back up,
+  // and again whenever the tab returns to the foreground in case the browser
+  // suspended the in-flight loop while it was hidden.
+  const resumeImageCleanup = useApp((s) => s.resumeImageCleanup)
+  useEffect(() => {
+    if (!ready) return
+    void resumeImageCleanup()
+    const onVisible = () => {
+      if (!document.hidden) void resumeImageCleanup()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [ready, resumeImageCleanup])
 
   // Scroll to the top whenever the route changes (e.g. tapping a container in
   // a stack shouldn't inherit the stack page's scroll position).
@@ -132,6 +148,8 @@ function Router() {
       return <StackEditorScreen stackId={screen.props?.id} />
     case 'volumes':
       return <VolumesScreen />
+    case 'drives':
+      return <DrivesScreen />
     case 'networks':
       return <NetworksScreen />
     case 'network-detail':

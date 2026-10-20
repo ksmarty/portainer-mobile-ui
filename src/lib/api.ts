@@ -4,6 +4,7 @@ import {
   demoDashboard,
   demoDanglingImages,
   demoDeployStack,
+  demoDockerDiskUsage,
   demoGet,
   demoGetImageInfo,
   demoGetNetworkInfo,
@@ -21,7 +22,9 @@ import {
 import type {
   Container,
   DashboardStats,
+  DockerDiskUsage,
   Endpoint,
+  HostStorage,
   Image,
   ImageInfo,
   LogLine,
@@ -211,10 +214,36 @@ export function getEndpoints(): Promise<Endpoint[]> {
   return portainerFetch<Endpoint[]>('/endpoints', undefined, { limit: 100, start: 0 })
 }
 
+/* ------------------------------ host storage ----------------------------- */
+
+// Read the host disk snapshot the container entrypoint writes to
+// /storage.json (regenerated every 15s from `df`). Same-origin, so it works
+// whether or not a Portainer connection is configured. Returns null when the
+// file isn't served (e.g. running `vite dev` with no container in front) so
+// callers can fall back to demo data instead of erroring.
+export async function getStorage(): Promise<HostStorage | null> {
+  try {
+    const res = await fetch('/storage.json', { cache: 'no-store' })
+    if (!res.ok) return null
+    const data = (await res.json()) as HostStorage
+    if (!data || !Array.isArray(data.mounts)) return null
+    return data
+  } catch {
+    return null
+  }
+}
+
 /* ------------------------------ dashboard -------------------------------- */
 
+// The dashboard reports host-wide CPU/memory for every endpoint. CPU is a
+// percentage of the whole host, so it must NOT be scaled by the core count —
+// scaling by `cpus` inflated a lightly-busy host to a hard 100% on open.
+// A tiny exponential moving average keeps a single noisy sample from spiking
+// the dial while still tracking real changes within a second or two.
+let smoothCpu: number | null = null
+
 export function getDashboard(): Promise<DashboardStats> {
-  if (isDemo()) return demoDelay(demoDashboard(), 300)
+  if (isDemo()) return demoDelay(demoDashboard(), 220)
   return (async () => {
     const eps = await getEndpoints()
     const total: DashboardStats = {
@@ -248,17 +277,21 @@ export function getDashboard(): Promise<DashboardStats> {
         total.networks += networks.length
         total.memoryTotal += info.MemTotal || 0
         // Live CPU + memory usage. One-shot stats report precpu_stats equal to
-        // cpu_stats (delta 0), so sample twice ~1.5s apart and diff them.
+        // cpu_stats (delta 0), so sample twice a short interval apart and diff
+        // them. Keep the window tight (~800ms) so the dial reacts quickly.
         const running = containers.filter((c) => c.State === 'running')
         if (running.length > 0) {
           const ids = running.map((c) => c.Id)
           const a = await sampleContainerUsage(ep.Id, ids)
-          await new Promise((r) => setTimeout(r, 1500))
+          await new Promise((r) => setTimeout(r, 800))
           const b = await sampleContainerUsage(ep.Id, ids)
           for (let k = 0; k < b.length; k++) {
             const dTotal = b[k].total - a[k].total
             const dSys = b[k].sys - a[k].sys
-            if (dSys > 0 && dTotal >= 0) total.cpu += (dTotal / dSys) * b[k].cpus * 100
+            // Fraction of the whole host's CPU time used by this container —
+            // the raw docker-stats formula scaled by core count would read
+            // Nx too high and peg the gauge at 100%.
+            if (dSys > 0 && dTotal >= 0) total.cpu += (dTotal / dSys) * 100
             total.memoryUsed += b[k].mem
           }
         }
@@ -267,7 +300,10 @@ export function getDashboard(): Promise<DashboardStats> {
       }
     }
     total.stacks = (await stacksP).length
-    total.cpu = Math.min(100, Math.round(total.cpu))
+    total.cpu = Math.min(100, Math.max(0, total.cpu))
+    // Smooth the CPU across polls so a momentary burst doesn't flash 100%.
+    smoothCpu = smoothCpu === null ? total.cpu : smoothCpu * 0.5 + total.cpu * 0.5
+    total.cpu = Math.round(smoothCpu)
     total.memory =
       total.memoryTotal > 0 ? Math.min(100, Math.round((total.memoryUsed / total.memoryTotal) * 100)) : 0
     return total
@@ -555,6 +591,46 @@ export function removeImage(endpointId: number, id: string, force = false): Prom
     return demoDelay(undefined)
   }
   return portainerFetch<void>(dockerPath(endpointId, `/images/${id}`), { method: 'DELETE' }, { force, noprune: 0 })
+}
+
+// Docker's storage breakdown (`docker system df`): what images, containers,
+// volumes and the build cache take up, and how much of it could be reclaimed.
+export function getDockerDiskUsage(endpointId: number): Promise<DockerDiskUsage> {
+  if (isDemo()) return demoDelay(demoDockerDiskUsage(), 260)
+  return portainerFetch<{
+    LayersSize?: number
+    Images?: { Size?: number; SharedSize?: number; Containers?: number }[]
+    Containers?: { SizeRw?: number; SizeRootFs?: number }[]
+    Volumes?: { UsageData?: { Size?: number; RefCount?: number } }[]
+    BuildCache?: { Size?: number; InUse?: boolean }[]
+  }>(dockerPath(endpointId, '/system/df')).then((d) => {
+    const imagesSize = (d.Images || []).reduce((s, i) => s + (i.Size || 0), 0)
+    // An image is reclaimable only when no container references it.
+    const imagesReclaimable = (d.Images || [])
+      .filter((i) => !i.Containers)
+      .reduce((s, i) => s + (i.Size || 0), 0)
+    const containersSize = (d.Containers || []).reduce((s, c) => s + (c.SizeRw || 0), 0)
+    const volumesSize = (d.Volumes || []).reduce((s, v) => s + (v.UsageData?.Size || 0), 0)
+    const volumesReclaimable = (d.Volumes || [])
+      .filter((v) => !v.UsageData?.RefCount)
+      .reduce((s, v) => s + (v.UsageData?.Size || 0), 0)
+    const buildCacheSize = (d.BuildCache || []).reduce((s, b) => s + (b.Size || 0), 0)
+    const buildCacheReclaimable = (d.BuildCache || [])
+      .filter((b) => !b.InUse)
+      .reduce((s, b) => s + (b.Size || 0), 0)
+    return {
+      imagesSize,
+      imagesReclaimable,
+      containersSize,
+      containersReclaimable: 0,
+      volumesSize,
+      volumesReclaimable,
+      buildCacheSize,
+      buildCacheReclaimable,
+      totalSize: imagesSize + containersSize + volumesSize + buildCacheSize,
+      totalReclaimable: imagesReclaimable + volumesReclaimable + buildCacheReclaimable,
+    }
+  })
 }
 
 export interface PullResult {

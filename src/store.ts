@@ -12,7 +12,9 @@ import {
   getContainers,
   getContainerLogs,
   getContainerStats,
+  getDanglingImages,
   getDashboard,
+  getDockerDiskUsage,
   getEndpoints,
   getImages,
   getNetworks,
@@ -20,6 +22,7 @@ import {
   getSettings,
   getStacks,
   getStackFile,
+  getStorage,
   getTeams,
   getUsers,
   getVolumes,
@@ -42,11 +45,15 @@ import {
 import type { PullResult } from './lib/api'
 import { extractComposeImages, composeImageForService } from './lib/compose'
 import { resolveContainerImage, stackForContainer } from './lib/containerRefs'
-import { demoAddEndpoint, demoAddTeam, demoAddUser, demoRemoveTeam, demoRemoveUser } from './lib/demo'
+import { demoAddEndpoint, demoAddTeam, demoAddUser, demoHostStorage, demoRemoveTeam, demoRemoveUser } from './lib/demo'
+import { loadCleanupJob, saveCleanupJob, clearCleanupJob } from './lib/cleanup'
 import type {
+  CleanupJob,
   Container,
   DashboardStats,
+  DockerDiskUsage,
   Endpoint,
+  HostStorage,
   Image,
   LogLine,
   Network,
@@ -58,8 +65,7 @@ import type {
   User,
   Volume,
 } from './lib/types'
-import { uid } from './lib/utils'
-
+import { bytes, uid } from './lib/utils'
 export interface Screen {
   name: string
   title: string
@@ -96,6 +102,10 @@ interface AppState {
   registries: Registry[]
   settings: Settings | null
   dashboard: DashboardStats | null
+  diskUsage: DockerDiskUsage | null
+  storage: HostStorage | null
+  storageLoading: boolean
+  cleanupJob: CleanupJob | null
   loading: boolean
   error: string | null
   toasts: Toast[]
@@ -113,6 +123,12 @@ interface AppState {
   back: () => void
   setNavGuard: (fn: ((proceed: () => void) => boolean) | null) => void
   refresh: () => Promise<void>
+  refreshDashboard: () => Promise<void>
+  refreshStorage: () => Promise<void>
+  loadDiskUsage: () => Promise<void>
+  startImageCleanup: () => Promise<void>
+  resumeImageCleanup: () => Promise<void>
+  dismissCleanup: () => void
   toast: (message: string, kind?: Toast['kind']) => void
   dismissToast: (id: string) => void
 
@@ -123,7 +139,6 @@ interface AppState {
   doCreateContainer: (name: string, image: string) => Promise<void>
   doPullImage: (image: string) => Promise<void>
   doRemoveImage: (id: string) => Promise<void>
-  refreshDashboard: () => Promise<void>
   doRemoveVolume: (name: string) => Promise<void>
   doRemoveNetwork: (id: string) => Promise<void>
   doDeployStack: (name: string, file: string, env?: { name: string; value: string }[]) => Promise<void>
@@ -178,6 +193,57 @@ async function pullRefFor(c: Container, stack: Stack | undefined, images: Image[
   return resolveContainerImage(c, images) || (await stackImageRef(c, stack))
 }
 
+// Module-level guard so a resumed job and a freshly-started one can never run
+// the same cleanup twice at once (e.g. boot resume + focus resume racing).
+let cleanupRunning = false
+
+// Executes a cleanup job one image at a time, writing progress to the store and
+// mirroring it to localStorage after every step. Lives outside React so
+// navigation and sheet close/open never interrupt it, and a page reload can
+// pick the job back up from storage.
+async function runCleanupJob(
+  initial: CleanupJob,
+  set: (partial: Partial<AppState>) => void,
+  get: () => AppState,
+): Promise<void> {
+  if (cleanupRunning) return
+  cleanupRunning = true
+  let job: CleanupJob = { ...initial, status: 'running', remaining: [...initial.remaining] }
+  set({ cleanupJob: job })
+  saveCleanupJob(job)
+  const ep = job.endpointId
+
+  while (job.remaining.length > 0) {
+    const item = job.remaining[0]
+    try {
+      await removeImage(ep, item.id, true)
+      job = { ...job, reclaimed: job.reclaimed + item.size, done: job.done + 1 }
+    } catch {
+      job = { ...job, failed: job.failed + 1, done: job.done + 1 }
+    }
+    job = { ...job, remaining: job.remaining.slice(1) }
+    set({ cleanupJob: job })
+    saveCleanupJob(job)
+  }
+
+  const removed = job.total - job.failed
+  job = { ...job, status: job.failed && !job.reclaimed ? 'error' : 'done', finishedAt: Date.now() }
+  set({ cleanupJob: job })
+  saveCleanupJob(job)
+  cleanupRunning = false
+
+  if (job.failed === 0) {
+    get().toast(`Freed ${bytes(job.reclaimed)} (${removed} image${removed === 1 ? '' : 's'})`, 'success')
+  } else if (removed > 0) {
+    get().toast(`Removed ${removed} of ${job.total} images`, 'info')
+  } else {
+    get().toast('Could not remove any images', 'error')
+  }
+  // The list changed under us — pull the fresh image list so the Images screen
+  // reflects what was deleted.
+  void get().refresh()
+}
+
 export const useApp = create<AppState>((set, get) => ({
   ready: false,
   booting: false,
@@ -199,6 +265,10 @@ export const useApp = create<AppState>((set, get) => ({
   registries: [],
   settings: null,
   dashboard: null,
+  diskUsage: null,
+  storage: null,
+  storageLoading: false,
+  cleanupJob: loadCleanupJob(),
   loading: false,
   error: null,
   toasts: [],
@@ -593,6 +663,77 @@ export const useApp = create<AppState>((set, get) => ({
     } catch {
       /* keep the last known values */
     }
+  },
+
+  // Host disk snapshot (the drive this container — and therefore Portainer —
+  // runs on). Served same-origin as /storage.json; falls back to demo data when
+  // the file isn't produced (local dev / preview without the entrypoint).
+  refreshStorage: async () => {
+    set({ storageLoading: true })
+    try {
+      const live = await getStorage()
+      set({ storage: live || (isDemo() ? demoHostStorage() : null), storageLoading: false })
+    } catch {
+      set({ storage: isDemo() ? demoHostStorage() : null, storageLoading: false })
+    }
+  },
+
+  // Docker's own storage breakdown for the active endpoint (`docker system df`).
+  loadDiskUsage: async () => {
+    try {
+      set({ diskUsage: await getDockerDiskUsage(endpointId(get())) })
+    } catch {
+      set({ diskUsage: null })
+    }
+  },
+
+  // Kick off a background cleanup of the endpoint's dangling images. The loop
+  // lives here in the store (not in a component), and mirrors progress to
+  // localStorage each step, so it keeps running while the user navigates and
+  // can be resumed after a page reload.
+  startImageCleanup: async () => {
+    if (cleanupRunning) return
+    const ep = endpointId(get())
+    let dangling: Image[]
+    try {
+      dangling = await getDanglingImages(ep)
+    } catch (e) {
+      get().toast((e as Error).message, 'error')
+      return
+    }
+    if (!dangling.length) {
+      get().toast('Nothing to clean up', 'info')
+      return
+    }
+    const job: CleanupJob = {
+      endpointId: ep,
+      status: 'running',
+      remaining: dangling.map((i) => ({ id: i.Id, size: i.Size || 0 })),
+      total: dangling.length,
+      done: 0,
+      failed: 0,
+      reclaimed: 0,
+      totalBytes: dangling.reduce((s, i) => s + (i.Size || 0), 0),
+      startedAt: Date.now(),
+    }
+    void runCleanupJob(job, set as (p: Partial<AppState>) => void, get)
+  },
+
+  // Rebuild a persisted "running" job after a reload and finish the images that
+  // were still pending. Called on boot and when the app regains focus.
+  resumeImageCleanup: async () => {
+    if (cleanupRunning) return
+    const job = get().cleanupJob
+    if (!job || job.status !== 'running') return
+    // The job carries its own endpoint, and deletion targets that endpoint, so
+    // it can safely resume even if the active endpoint changed since the reload.
+    void runCleanupJob(job, set as (p: Partial<AppState>) => void, get)
+  },
+
+  dismissCleanup: () => {
+    if (get().cleanupJob?.status === 'running') return
+    clearCleanupJob()
+    set({ cleanupJob: null })
   },
 
   doRemoveVolume: async (name) => {

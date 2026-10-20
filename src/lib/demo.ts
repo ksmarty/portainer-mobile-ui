@@ -1,7 +1,9 @@
 import type {
   Container,
   DashboardStats,
+  DockerDiskUsage,
   Endpoint,
+  HostStorage,
   Image,
   ImageInfo,
   LogLine,
@@ -488,6 +490,37 @@ export function demoDashboard(): DashboardStats {
     memory: Math.round((memUsed / memTotal) * 100),
     memoryUsed: memUsed,
     memoryTotal: memTotal,
+  }
+}
+
+export function demoDockerDiskUsage(): DockerDiskUsage {
+  return {
+    imagesSize: gb(3.2),
+    imagesReclaimable: mb(281),
+    containersSize: mb(64),
+    containersReclaimable: 0,
+    volumesSize: gb(8.3),
+    volumesReclaimable: gb(5.1),
+    buildCacheSize: gb(1.4),
+    buildCacheReclaimable: mb(940),
+    totalSize: gb(12.9),
+    totalReclaimable: gb(6.3),
+  }
+}
+
+// Fallback host disk snapshot when /storage.json isn't served (local dev /
+// preview). Mirrors the entrypoint's shape so the dashboard dial works
+// everywhere. `used` is what the Drive info screen shows for the demo host.
+export function demoHostStorage(): HostStorage {
+  return {
+    generatedAt: Date.now(),
+    host: 'demo-host',
+    mounts: [
+      { filesystem: '/dev/nvme0n1p2', mountpoint: '/', totalBytes: gb(494), usedBytes: gb(213), availBytes: gb(281), usedPercent: 43 },
+      { filesystem: '/dev/nvme0n1p1', mountpoint: '/boot/efi', totalBytes: mb(512), usedBytes: mb(63), availBytes: mb(449), usedPercent: 12 },
+      { filesystem: '/dev/sda1', mountpoint: '/mnt/backups', totalBytes: gb(3726), usedBytes: gb(1204), availBytes: gb(2522), usedPercent: 32 },
+      { filesystem: 'tmpfs', mountpoint: '/run', totalBytes: mb(780), usedBytes: mb(2), availBytes: mb(778), usedPercent: 0 },
+    ],
   }
 }
 

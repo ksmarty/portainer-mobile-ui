@@ -140,6 +140,19 @@ labels:
 - **Memory-tuned nginx** — single worker process, access logging disabled, low `worker_connections`.
 - Built-in `HEALTHCHECK` so Compose can report container health.
 
+## Host storage & drives
+
+The dashboard's **Storage** dial and the **Drive info** screen show the disk the app (and, when it runs on the same host, Portainer) is using. The container entrypoint generates `/storage.json` from `df` and refreshes it every 15 seconds, so the numbers track live usage without an app rebuild:
+
+- The container root filesystem is the host's overlay backing store, so `df /` reports the **main drive** — that's the dial's default.
+- To also list the host's other partitions, bind-mount the host root into the container and the extra mounts appear on the Drive info screen. The app falls back to a demo snapshot when the file isn't served (local dev / preview).
+
+Docker's own storage breakdown (`docker system df` — images, containers, volumes, build cache and what's reclaimable) is shown on the same screen, summed from the active endpoint.
+
+## Image cleanup
+
+"Clean up unused images" on the Images screen removes dangling images **one at a time** in a background job that lives in the store, so it keeps running while you navigate — and it is mirrored to `localStorage` after every image, so closing the tab or reloading resumes it exactly where it left off. Progress shows as a banner on the Images screen and in the cleanup sheet.
+
 ## CI & releases (GitHub Actions)
 
 Workflows live in `.github/workflows/`, following the pattern used by [ksmarty/v1](https://github.com/ksmarty/v1):

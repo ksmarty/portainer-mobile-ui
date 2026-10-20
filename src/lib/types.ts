@@ -203,3 +203,50 @@ export interface DashboardStats {
   memoryUsed: number
   memoryTotal: number
 }
+
+/** One mounted filesystem on the host running Portainer / this app. */
+export interface HostMount {
+  filesystem: string
+  mountpoint: string
+  totalBytes: number
+  usedBytes: number
+  availBytes: number
+  usedPercent: number
+}
+
+/** Snapshot emitted by the container entrypoint as /storage.json (`df`). */
+export interface HostStorage {
+  generatedAt: number
+  host: string
+  mounts: HostMount[]
+}
+
+/** `docker system df` totals for one endpoint (reclaimable Docker storage). */
+export interface DockerDiskUsage {
+  imagesSize: number
+  imagesReclaimable: number
+  containersSize: number
+  containersReclaimable: number
+  volumesSize: number
+  volumesReclaimable: number
+  buildCacheSize: number
+  buildCacheReclaimable: number
+  totalSize: number
+  totalReclaimable: number
+}
+
+/** One in-flight/finished image cleanup. Persisted so a reload can resume it. */
+export interface CleanupJob {
+  endpointId: number
+  status: 'running' | 'done' | 'error'
+  /** Images being cleaned (id + size), trimmed as each one is removed. */
+  remaining: { id: string; size: number }[]
+  total: number
+  done: number
+  failed: number
+  reclaimed: number
+  totalBytes: number
+  startedAt: number
+  finishedAt?: number
+  error?: string
+}

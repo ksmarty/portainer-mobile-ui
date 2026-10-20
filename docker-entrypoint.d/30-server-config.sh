@@ -51,6 +51,13 @@ server {
         add_header Cache-Control "no-cache, must-revalidate";
         try_files /index.html =404;
     }
+
+    # Host storage snapshot, regenerated in the background by the entrypoint.
+    # Must never be cached: the whole point is that it tracks live disk usage.
+    location = /storage.json {
+        add_header Cache-Control "no-cache, must-revalidate";
+        try_files /storage.json =404;
+    }
 EOF
 
 if [ -n "$PORTAINER_URL" ]; then
@@ -91,5 +98,44 @@ fi
 cat >> "$CONF" <<'EOF'
 }
 EOF
+
+# ---- Host storage snapshot ------------------------------------------------
+# Emits /usr/share/nginx/html/storage.json from `df` so the dashboard can show
+# the disk that this container (and therefore Portainer, when run on the same
+# host) is using. The container root fs is the host's overlay backing store, so
+# `df /` reports the main drive; any extra host partitions appear when the host
+# root is bind-mounted into /host. Refresh happens on a loop so the numbers
+# track live usage without an app rebuild.
+STORAGE=/usr/share/nginx/html/storage.json
+
+gen_storage() {
+    TMP="${STORAGE}.tmp"
+    HOST="$(hostname)"
+    NOW="$(date +%s)000"
+    { df -kP 2>/dev/null || df -k 2>/dev/null; } | awk -v host="$HOST" -v now="$NOW" '
+        function esc(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return s }
+        BEGIN { printf "{\"generatedAt\":%s,\"host\":\"%s\",\"mounts\":[", now, esc(host); first = 1 }
+        NR == 1 { next }
+        {
+            total = $2 + 0
+            if (total <= 0) next
+            used = $3 + 0
+            avail = $4 + 0
+            cap = $5; gsub(/%/, "", cap)
+            mount = ""
+            for (i = 6; i <= NF; i++) mount = mount (i > 6 ? " " : "") $i
+            if (mount == "") next
+            if (!first) printf ","
+            first = 0
+            printf "\n  {\"filesystem\":\"%s\",\"mountpoint\":\"%s\",\"totalBytes\":%d,\"usedBytes\":%d,\"availBytes\":%d,\"usedPercent\":%d}",
+                esc($1), esc(mount), total * 1024, used * 1024, avail * 1024, cap + 0
+        }
+        END { if (!first) printf "\n"; printf "]}"; printf "\n" }
+    ' > "$TMP" 2>/dev/null && mv "$TMP" "$STORAGE"
+    return 0
+}
+
+gen_storage
+( while :; do sleep 15; gen_storage; done ) &
 
 echo "[entrypoint] generated $CONF (PORTAINER_URL=$PORTAINER_URL)"
