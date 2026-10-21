@@ -17,6 +17,7 @@ import { StackDetailScreen } from './screens/StackDetail'
 import { StackEditorScreen } from './screens/StackEditor'
 import { VolumesScreen } from './screens/Volumes'
 import { DrivesScreen } from './screens/Drives'
+import { MemoryScreen } from './screens/Memory'
 import { NetworksScreen } from './screens/Networks'
 import { NetworkDetailScreen } from './screens/NetworkDetail'
 import { EndpointsScreen } from './screens/Endpoints'
@@ -179,6 +180,8 @@ function Router() {
       return <VolumesScreen />
     case 'drives':
       return <DrivesScreen />
+    case 'memory':
+      return <MemoryScreen />
     case 'networks':
       return <NetworksScreen />
     case 'network-detail':

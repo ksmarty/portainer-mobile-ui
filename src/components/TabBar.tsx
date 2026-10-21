@@ -24,6 +24,8 @@ const tabOf: Record<string, string> = {
   'stack-file': 'stacks',
   'deploy-stack': 'stacks',
   networks: 'networks',
+  drives: 'home',
+  memory: 'home',
   settings: 'settings',
   'schema-settings': 'settings',
 }

@@ -1,5 +1,6 @@
 import type {
   Container,
+  ContainerMemory,
   DashboardStats,
   DockerDiskUsage,
   Endpoint,
@@ -515,11 +516,20 @@ export function demoHostStorage(): HostStorage {
   return {
     generatedAt: Date.now(),
     host: 'demo-host',
+    hostMounts: true,
+    hiddenMounts: 0,
     mounts: [
       { filesystem: '/dev/nvme0n1p2', mountpoint: '/', disk: 'nvme0n1', totalBytes: gb(494), usedBytes: gb(213), availBytes: gb(281), usedPercent: 43 },
       { filesystem: '/dev/nvme0n1p1', mountpoint: '/boot/efi', disk: 'nvme0n1', totalBytes: mb(512), usedBytes: mb(63), availBytes: mb(449), usedPercent: 12 },
       { filesystem: '/dev/sda1', mountpoint: '/mnt/backups', disk: 'sda', totalBytes: gb(3726), usedBytes: gb(1204), availBytes: gb(2522), usedPercent: 32 },
       { filesystem: 'tmpfs', mountpoint: '/run', disk: '', totalBytes: mb(780), usedBytes: mb(2), availBytes: mb(778), usedPercent: 0 },
+    ],
+    devices: [
+      { name: 'nvme0n1', model: 'Samsung SSD 980 PRO 500GB', sizeBytes: gb(466), rotational: false },
+      { name: 'sda', model: 'WDC WD40EFRX-68N32N0', sizeBytes: gb(3726), rotational: true },
+      // Attached but never mounted: exactly the case the drive screen exists
+      // to surface, so demo data has to include one.
+      { name: 'sdb', model: 'CT2000MX500SSD1', sizeBytes: gb(1863), rotational: false },
     ],
   }
 }
@@ -550,6 +560,22 @@ export function demoLogs(containerId: string, lines = 80): LogLine[] {
     })
   }
   return out
+}
+
+export function demoContainerMemory(): ContainerMemory[] {
+  return demoState.containers.map((c) => {
+    const running = c.State === 'running'
+    const mem = running ? mb(60) + Math.floor(Math.random() * mb(1400)) : 0
+    const limit = gb(2)
+    return {
+      id: c.Id,
+      name: c.Names[0]?.replace(/^\//, '') || c.Id.slice(0, 12),
+      state: c.State,
+      mem,
+      limit,
+      percent: limit > 0 ? (mem / limit) * 100 : 0,
+    }
+  })
 }
 
 export function demoStats(): Stats {

@@ -14,7 +14,7 @@ import {
   IconWifi,
 } from '../components/Icons'
 import { Ring, ListItem, SectionTitle, Skeleton, useAnimatedNumber } from '../components/ui'
-import { groupByDisk } from '../lib/utils'
+import { bytes, groupByDisk } from '../lib/utils'
 
 // Capacity in GB, with a decimal below 100 so a 60 GB volume doesn't round to
 // "60 / 60" and look full.
@@ -161,6 +161,16 @@ export function HomeScreen() {
               : 'All drives & partitions'
           }
           to={{ name: 'drives', title: 'Drive info' }}
+        />
+        <QuickItem
+          icon={<IconMemory size={19} />}
+          label="Container memory"
+          sub={
+            dashboard.memoryUsed > 0
+              ? `${bytes(dashboard.memoryUsed)} in use · ranked by container`
+              : 'Memory use, highest first'
+          }
+          to={{ name: 'memory', title: 'Container memory' }}
         />
         <QuickItem icon={<IconServer size={19} />} label="Endpoints" sub={`${endpoints.length} configured`} to={{ name: 'endpoints', title: 'Endpoints' }} />
         <QuickItem icon={<IconUsers size={19} />} label="Users & teams" sub="Access control" to={{ name: 'users', title: 'Users' }} />

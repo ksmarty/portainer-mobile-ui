@@ -6,6 +6,15 @@ services:
     # Direct access on :8080 (optional). Remove if Traefik is the only ingress.
     ports:
       - "8080:80"
+    volumes:
+      # Host root, read-only, with mount propagation: this is what lets the
+      # Drive info screen list EVERY partition on the host rather than only the
+      # disk Docker's container sits on. A container has its own mount
+      # namespace, so without this `df` inside sees one overlay root and
+      # nothing else. `rslave` propagates the host's mounts into the container,
+      # `ro` guarantees the app cannot write to them. Drop this volume if you
+      # only want the Docker disk shown.
+      - /:/host:ro,rslave
     environment:
       # Same-origin proxy: the container's nginx forwards /api/* to Portainer
       # server-side, so the browser never calls a different origin (no CORS).

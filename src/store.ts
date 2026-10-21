@@ -13,6 +13,7 @@ import {
   getContainers,
   getContainerLogs,
   getContainerStats,
+  getContainersMemory,
   getDanglingImages,
   getDashboard,
   getDockerDiskUsage,
@@ -45,12 +46,13 @@ import {
 } from './lib/api'
 import type { PullResult } from './lib/api'
 import { extractComposeImages, composeImageForService } from './lib/compose'
-import { resolveContainerImage, stackForContainer } from './lib/containerRefs'
+import { resolveContainerImage, stackForContainer, stripSha } from './lib/containerRefs'
 import { demoAddEndpoint, demoAddTeam, demoAddUser, demoHostStorage, demoRemoveTeam, demoRemoveUser } from './lib/demo'
 import { loadCleanupJob, beatCleanup, claimCleanup, releaseCleanup, readCleanupJob, clearCleanupJob } from './lib/cleanup'
 import type {
   CleanupJob,
   Container,
+  ContainerMemory,
   DashboardStats,
   DockerDiskUsage,
   Endpoint,
@@ -114,6 +116,8 @@ interface AppState {
   logsLoading: boolean
   stats: Stats | null
   statsTimer: number | null
+  memoryUsage: ContainerMemory[]
+  memoryLoading: boolean
 
   boot: () => Promise<void>
   connect: (url: string, token: string, isJwt: boolean) => Promise<void>
@@ -137,7 +141,11 @@ interface AppState {
   doContainerAction: (id: string, action: string) => Promise<void>
   doRemoveContainer: (id: string) => Promise<void>
   doFetchNewImage: (id: string) => Promise<void>
-  doUpdateContainer: (id: string, onProgress?: (step: string) => void) => Promise<void>
+  doUpdateContainer: (
+    id: string,
+    onProgress?: (step: string) => void,
+    opts?: { removeOldImage?: boolean },
+  ) => Promise<void>
   doCreateContainer: (name: string, image: string) => Promise<void>
   doPullImage: (image: string) => Promise<void>
   doRemoveImage: (id: string) => Promise<void>
@@ -151,6 +159,7 @@ interface AppState {
   loadLogs: (id: string, tail?: number) => Promise<void>
   startStats: (id: string) => void
   stopStats: () => void
+  loadMemoryUsage: () => Promise<void>
   openStackFile: (id: number) => Promise<void>
   doAddEndpoint: (name: string, url: string) => Promise<void>
   doAddUser: (username: string, password: string, role: number) => Promise<void>
@@ -193,6 +202,45 @@ async function stackImageRef(c: Container, stack: Stack | undefined): Promise<st
 // The best pullable reference we can find for a container's image.
 async function pullRefFor(c: Container, stack: Stack | undefined, images: Image[]): Promise<string | null> {
   return resolveContainerImage(c, images) || (await stackImageRef(c, stack))
+}
+
+// Delete the image a container ran before an update, once nothing uses it.
+//
+// Deleting is deliberately conservative: Docker refuses to remove an image that
+// a container still references, but a sibling container on the same tag (or a
+// stack that has not rolled over yet) is exactly the case worth checking first.
+// Only untagged leftovers of the OLD id are removed — the tag now points at the
+// new image, so `removeImage(oldId)` cannot take the new one with it. A 404 or
+// a 409 (still in use) is not an error: the goal is "no stale layer lying
+// around", not "the delete must succeed".
+async function removeOldImageIfUnused(
+  ep: number,
+  oldImageId: string,
+  onProgress: ((step: string) => void) | undefined,
+  get: () => AppState,
+) {
+  // Let the containers list settle so the "is it still used" check below sees
+  // the post-update state, not the pre-update snapshot.
+  const containers = await getContainers(ep, true).catch(() => get().containers)
+  const stillUsed = containers.some((c) => stripSha(c.ImageID) === stripSha(oldImageId))
+  if (stillUsed) {
+    onProgress?.('Old image is still in use — kept')
+    return
+  }
+  onProgress?.('Removing old image…')
+  try {
+    await removeImage(ep, oldImageId, false)
+    onProgress?.('Old image removed')
+  } catch (e) {
+    // 404 = already gone; 409 = a container picked it up in the meantime.
+    const status = (e as { status?: number }).status
+    if (status === 404 || status === 409) {
+      onProgress?.('Old image was already gone')
+      return
+    }
+    // A refusal must not fail the update, which has already succeeded.
+    get().toast(`Updated, but the old image could not be removed: ${(e as Error).message}`, 'error')
+  }
 }
 
 // Module-level guard so a resumed job and a freshly-started one can never run
@@ -307,6 +355,8 @@ export const useApp = create<AppState>((set, get) => ({
   logsLoading: false,
   stats: null,
   statsTimer: null,
+  memoryUsage: [],
+  memoryLoading: false,
 
   boot: async () => {
     if (get().booting || get().ready) return
@@ -621,11 +671,15 @@ export const useApp = create<AppState>((set, get) => ({
   // Container-scoped "pull latest and update": pull this container's image,
   // then apply it — re-deploying the stack the container belongs to, or
   // recreating the container when it stands alone.
-  doUpdateContainer: async (id, onProgress) => {
+  doUpdateContainer: async (id, onProgress, opts) => {
     const c = get().containers.find((x) => x.Id === id)
     if (!c) return
     const ep = endpointId(get())
     const stack = stackForContainer(c, get().stacks)
+    // The image the container runs right now. Captured before the update runs
+    // because a recreation makes the container report its new image, and the
+    // old one would be unrecoverable afterwards.
+    const previousImageId = c.ImageID
     try {
       const ref = await pullRefFor(c, stack, get().images)
       if (!ref) {
@@ -645,6 +699,9 @@ export const useApp = create<AppState>((set, get) => ({
         get().toast('Container updated', 'success')
       }
       await get().refresh()
+      if (opts?.removeOldImage && previousImageId) {
+        await removeOldImageIfUnused(ep, previousImageId, onProgress, get)
+      }
     } catch (e) {
       get().toast((e as Error).message, 'error')
       throw e
@@ -929,6 +986,22 @@ export const useApp = create<AppState>((set, get) => ({
     const t = get().statsTimer
     if (t) window.clearInterval(t)
     set({ statsTimer: null, stats: null })
+  },
+
+  // Per-container memory footprint for the ranking screen. One sample per
+  // container is enough (memory is a gauge), so this is a single parallel pass
+  // rather than the two-reading loop the CPU dial needs.
+  loadMemoryUsage: async () => {
+    set({ memoryLoading: true })
+    try {
+      const rows = await getContainersMemory(endpointId(get()))
+      // Highest first: the point of the screen is to find the hog at the top.
+      rows.sort((a, b) => b.mem - a.mem)
+      set({ memoryUsage: rows, memoryLoading: false })
+    } catch (e) {
+      set({ memoryLoading: false })
+      get().toast((e as Error).message, 'error')
+    }
   },
 
   openStackFile: async (id) => {

@@ -100,12 +100,22 @@ cat >> "$CONF" <<'EOF'
 EOF
 
 # ---- Host storage snapshot ------------------------------------------------
-# Emits /usr/share/nginx/html/storage.json from `df` so the dashboard can show
-# the disk that this container (and therefore Portainer, when run on the same
-# host) is using. The container root fs is the host's overlay backing store, so
-# `df /` reports the main drive; any extra host partitions appear when the host
-# root is bind-mounted into /host. Refresh happens on a loop so the numbers
-# track live usage without an app rebuild.
+# Emits /usr/share/nginx/html/storage.json so the dashboard can show the disks
+# the host is using. Refresh happens on a loop so the numbers track live usage
+# without an app rebuild.
+#
+# Two sources, in this order of preference:
+#
+#  1. The host mount table, read from /host/proc/self/mounts. This lists every
+#     partition the host has mounted — which `df` inside a container does NOT,
+#     because a container only sees its own namespace. It requires the host
+#     root to be bind-mounted at /host (compose.yaml does this with
+#     `- /:/host:ro,rslave`; `rslave` propagates the host's mounts into the
+#     container, `ro` keeps us from writing to them).
+#  2. Plain `df` on the container's own mounts. Always available, but it only
+#     reports the filesystem the container sits on (the host's overlay store),
+#     so other drives are invisible. This is the fallback for a deployment
+#     without the /host mount.
 #
 # Sizes are emitted in KiB, never in bytes: busybox awk (the awk in the alpine
 # nginx image) prints %d through a 32-bit int, so `kB * 1024` overflowed at
@@ -113,8 +123,14 @@ EOF
 # "NaN undefined". KiB stays well inside the range for any real disk, and the
 # frontend multiplies by 1024 in JS where the numbers are doubles.
 STORAGE=/usr/share/nginx/html/storage.json
+# The host root, bind-mounted read-only with mount propagation (compose.yaml).
+HOST_ROOT=/host
+# Our own mount namespace. Procfs is scoped to the reader's pid namespace, so
+# this is the only table that is reliably *ours* — and with `rslave` it already
+# carries the host's mounts, prefixed with $HOST_ROOT.
+MOUNTINFO=/proc/self/mountinfo
 
-# Map a df filesystem to its kernel block-device name. df reports whatever the
+# Map a filesystem to its kernel block-device name. df reports whatever the
 # mount table says — /dev/nvme0n1p2, /dev/mapper/vg-lv, /dev/md127, or nothing
 # at all for overlay/tmpfs. Only real block devices have a physical disk.
 block_name() {
@@ -178,35 +194,202 @@ phys_disk() {
     echo $_out | tr ' ' '\n' | sed '/^$/d' | sort -u | tr '\n' '+' | sed 's/+$//'
 }
 
+# Does this container see the host's filesystems? When the host root is
+# bind-mounted at /host with mount propagation, the host's real mounts show up
+# in OUR namespace as /host<path> — so the answer is read from our own mount
+# table, not from /host/proc. Reading /host/proc/1/mounts would be wrong: procfs
+# resolves PIDs inside the container's own pid namespace, so it would hand back
+# the container's mounts and look successful while reporting nothing.
+host_mounts_visible() {
+    grep -q " ${HOST_ROOT}/" "$MOUNTINFO" 2>/dev/null || grep -q " ${HOST_ROOT} " "$MOUNTINFO" 2>/dev/null
+}
+
+# Filesystem types that carry no capacity worth reporting. Docker's own overlay
+# layers, snap squashfs images and every kernel pseudo-fs land here, which is
+# what keeps the list down to the disks a person actually thinks about.
+is_pseudo_fs() {
+    case "$1" in
+        proc|sysfs|devtmpfs|devpts|tmpfs|ramfs|cgroup|cgroup2|securityfs|debugfs|\
+tracefs|pstore|bpf|configfs|fusectl|mqueue|hugetlbfs|autofs|nsfs|efivarfs|\
+binfmt_misc|squashfs|overlay|rpc_pipefs|nfsd|selinuxfs|fuse.lxcfs|fuse.gvfsd-fuse)
+            return 0 ;;
+    esac
+    return 1
+}
+
+# Escape a string for JSON.
+json_str() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+# One JSON object for a mount, or nothing when df can't size it.
+# $1 filesystem  $2 mountpoint  $3 path to run df on
+emit_mount() {
+    _fs=$1
+    _mp=$2
+    _path=$3
+    # df -P: one line per filesystem, no wrapped device names. busybox has it.
+    _line=$(df -kP "$_path" 2>/dev/null | sed -n '2p')
+    [ -n "$_line" ] || return 0
+    # shellcheck disable=SC2086
+    set -- $_line
+    _t=$2
+    _u=$3
+    _a=$4
+    _cap=$5
+    case "$_t" in ''|*[!0-9]*) return 0 ;; esac
+    [ "$_t" -gt 0 ] 2>/dev/null || return 0
+    _pct=$(printf '%s' "$_cap" | tr -cd '0-9')
+    [ -n "$_pct" ] || _pct=0
+    _disk=""
+    _bn=$(block_name "$_fs")
+    if [ -n "$_bn" ]; then
+        _disk=$(phys_disk "$_bn")
+    fi
+    printf '\n{"filesystem":"%s","mountpoint":"%s","disk":"%s","totalKb":%s,"usedKb":%s,"availKb":%s,"usedPercent":%s}' \
+        "$(json_str "$_fs")" "$(json_str "$_mp")" "$_disk" "$_t" "$_u" "$_a" "$_pct"
+}
+
+# Every physical disk on the host, whether or not it is mounted anywhere.
+#
+# This matters because a container's mount table only ever lists filesystems
+# that are mounted *into the container*, and the host-mount path above only
+# lists filesystems that are mounted at all — a drive that has never been
+# mounted, or a partition that was unmounted, is invisible to both. /sys is not
+# namespaced for block devices, so /sys/class/block shows the host's real disks
+# even with no /host bind mount.
+#
+# A leaf block device (no partitions inside it, no devices layered underneath)
+# with no `partition` file is a whole disk: sda, nvme0n1, vda. Logical devices
+# (dm-*, md*) are skipped on purpose — they hold slaves, and their capacity is
+# already reported by the filesystem mounted from them.
+emit_devices() {
+    printf '"devices":['
+    _first=1
+    for _d in /sys/class/block/*; do
+        _n=$(basename "$_d")
+        case "$_n" in
+            loop*|ram*|sr*|zram*|nbd*|fd*) continue ;;
+        esac
+        # Partitions are folded into their parent disk.
+        [ -e "$_d/partition" ] && continue
+        # Anything with a backing device is a logical volume/array, not a disk.
+        [ -d "$_d/slaves" ] && [ -n "$(ls -A "$_d/slaves" 2>/dev/null)" ] && continue
+        # 512-byte sectors; a disk reporting 0 is a card reader with no media.
+        _sz=$(cat "$_d/size" 2>/dev/null)
+        case "$_sz" in ''|*[!0-9]*) continue ;; esac
+        [ "$_sz" -gt 0 ] 2>/dev/null || continue
+        # KiB keeps the number inside busybox awk/bc integer range.
+        _kb=$((_sz / 2))
+        _model=""
+        [ -r "$_d/device/model" ] && _model=$(cat "$_d/device/model" 2>/dev/null | tr -s ' ' ' ' | sed 's/ *$//')
+        [ -z "$_model" ] && [ -r "$_d/device/vendor" ] && _model=$(cat "$_d/device/vendor" 2>/dev/null | tr -s ' ' ' ' | sed 's/ *$//')
+        _rota=1
+        [ -r "$_d/queue/rotational" ] && _rota=$(cat "$_d/queue/rotational" 2>/dev/null)
+        [ "$_first" = 1 ] || printf ','
+        _first=0
+        printf '\n{"name":"%s","model":"%s","sizeKb":%s,"rotational":%s}' \
+            "$(json_str "$_n")" "$(json_str "$_model")" "$_kb" "$([ "$_rota" = 0 ] && echo false || echo true)"
+    done
+    printf '\n]'
+}
+
 gen_storage() {
     TMP="${STORAGE}.tmp"
     HOST="$(hostname)"
     NOW="$(date +%s)000"
+    if host_mounts_visible; then MOUNTS_FILE="$MOUNTINFO"; else MOUNTS_FILE=""; fi
     {
-        printf '{"generatedAt":%s,"host":"%s","mounts":[' "$NOW" "$(printf '%s' "$HOST" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+        if [ -n "$MOUNTS_FILE" ]; then
+            printf '{"generatedAt":%s,"host":"%s","hostMounts":true,"mounts":[' "$NOW" "$(json_str "$HOST")"
+        else
+            printf '{"generatedAt":%s,"host":"%s","hostMounts":false,"mounts":[' "$NOW" "$(json_str "$HOST")"
+        fi
         FIRST=1
-        { df -kP 2>/dev/null || df -k 2>/dev/null; } | while read -r FS TOTAL USED AVAIL CAP MOUNT _REST; do
-            # Skip the header and any line without a numeric total.
-            case "$TOTAL" in ''|*[!0-9]*) continue ;; esac
-            [ "$TOTAL" -le 0 ] 2>/dev/null && continue
-            [ -n "$MOUNT" ] || continue
-            # df -P escapes spaces in the mount point as \040.
-            MOUNT=$(printf '%s' "$MOUNT" | sed 's/\\040/ /g')
-            PCT=$(printf '%s' "$CAP" | tr -cd '0-9')
-            [ -n "$PCT" ] || PCT=0
-            DISK=""
-            BN=$(block_name "$FS")
-            if [ -n "$BN" ]; then
-                DISK=$(phys_disk "$BN")
-            fi
-            if [ "$FIRST" = 0 ]; then printf ','; fi
-            FIRST=0
-            printf '\n{"filesystem":"%s","mountpoint":"%s","disk":"%s","totalKb":%s,"usedKb":%s,"availKb":%s,"usedPercent":%s}' \
-                "$(printf '%s' "$FS" | sed 's/\\/\\\\/g; s/"/\\"/g')" \
-                "$(printf '%s' "$MOUNT" | sed 's/\\/\\\\/g; s/"/\\"/g')" \
-                "$DISK" "$TOTAL" "$USED" "$AVAIL" "$PCT"
-        done
-        printf '\n]}\n'
+        if [ "$MOUNTS_FILE" = "$MOUNTINFO" ]; then
+            # Host view: every filesystem the host has mounted, propagated into
+            # /host by `rslave`. Capacities come from df on the propagated
+            # mount, so they are the host's real figures.
+            SEEN=""
+            HIDDEN=0
+            while read -r _line; do
+                set -- $_line
+                # mountinfo: id parent major:minor root mountpoint opts … - fstype source superopts
+                _mp=$5
+                _fstype=""
+                _src=""
+                _stage=0
+                for _f in "$@"; do
+                    case "$_stage" in
+                        1) _fstype=$_f; _stage=2; continue ;;
+                        2) _src=$_f; break ;;
+                    esac
+                    [ "$_f" = "-" ] && _stage=1
+                done
+                case "$_mp" in
+                    "$HOST_ROOT") _mp="/" ;;
+                    "$HOST_ROOT"/*) _mp=${_mp#"$HOST_ROOT"} ;;
+                    *) continue ;;
+                esac
+                is_pseudo_fs "$_fstype" && continue
+                # mountinfo escapes space, tab, newline and backslash as octal
+                # (\040 …). printf %b decodes them, and unlike a sed expression
+                # with a backslash replacement it works on both busybox and GNU.
+                _mp=$(printf '%b' "$_mp")
+                # One row per device: a filesystem is routinely bind mounted
+                # several times (/etc/hosts, a config dir, …) and every row
+                # would report the identical capacity.
+                case "$SEEN" in *"|$_src|"*) continue ;; esac
+                _path="$HOST_ROOT$_mp"
+                [ "$_mp" = "/" ] && _path="$HOST_ROOT"
+                # Must be a traversable directory, otherwise df silently
+                # reports some enclosing filesystem instead.
+                if [ ! -d "$_path" ] || [ ! -x "$_path" ]; then
+                    HIDDEN=$((HIDDEN + 1))
+                    continue
+                fi
+                _obj=$(emit_mount "$_src" "$_mp" "$_path")
+                if [ -z "$_obj" ]; then
+                    HIDDEN=$((HIDDEN + 1))
+                    continue
+                fi
+                SEEN="$SEEN|$_src|"
+                if [ "$FIRST" = 0 ]; then printf ','; fi
+                FIRST=0
+                printf '%s' "$_obj"
+            done < "$MOUNTINFO"
+            printf '\n]'
+            printf ',"hiddenMounts":%s,' "$HIDDEN"
+            emit_devices
+            printf '}\n'
+
+        else
+            # Fallback: the container's own mount namespace.
+            { df -kP 2>/dev/null || df -k 2>/dev/null; } | while read -r FS TOTAL USED AVAIL CAP MOUNT _REST; do
+                # Skip the header and any line without a numeric total.
+                case "$TOTAL" in ''|*[!0-9]*) continue ;; esac
+                [ "$TOTAL" -le 0 ] 2>/dev/null && continue
+                [ -n "$MOUNT" ] || continue
+                # df -P escapes spaces in the mount point as \040.
+                MOUNT=$(printf '%s' "$MOUNT" | sed 's/\\040/ /g')
+                PCT=$(printf '%s' "$CAP" | tr -cd '0-9')
+                [ -n "$PCT" ] || PCT=0
+                DISK=""
+                BN=$(block_name "$FS")
+                if [ -n "$BN" ]; then
+                    DISK=$(phys_disk "$BN")
+                fi
+                if [ "$FIRST" = 0 ]; then printf ','; fi
+                FIRST=0
+                printf '\n{"filesystem":"%s","mountpoint":"%s","disk":"%s","totalKb":%s,"usedKb":%s,"availKb":%s,"usedPercent":%s}' \
+                    "$(json_str "$FS")" "$(json_str "$MOUNT")" "$DISK" "$TOTAL" "$USED" "$AVAIL" "$PCT"
+            done
+            printf '\n]'
+            printf ',"hiddenMounts":0,'
+            emit_devices
+            printf '}\n'
+
+        fi
     } > "$TMP" 2>/dev/null && mv "$TMP" "$STORAGE"
     return 0
 }

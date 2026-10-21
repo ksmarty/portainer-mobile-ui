@@ -190,6 +190,21 @@ export interface Stats {
   pids: number
 }
 
+/**
+ * One container's memory footprint at a point in time, for the usage ranking
+ * screen. `mem` excludes page cache, matching what `docker stats` reports, so
+ * a mostly-idle container does not look like it holds half the host.
+ */
+export interface ContainerMemory {
+  id: string
+  name: string
+  state: string
+  mem: number
+  limit: number
+  /** mem / host memory limit, 0 when the limit is unknown. */
+  percent: number
+}
+
 export interface DashboardStats {
   endpoints: number
   stacks: number
@@ -219,11 +234,37 @@ export interface HostMount {
   usedPercent: number
 }
 
+/**
+ * One physical disk attached to the host, from /sys/class/block. Reported even
+ * when nothing is mounted from it, which is the whole point: a mount table can
+ * only ever name filesystems that are in use, so an unmounted drive (a spare
+ * SSD, a NAS candidate) would otherwise be invisible.
+ */
+export interface HostDevice {
+  /** Kernel device name, e.g. `sda` or `nvme0n1`. */
+  name: string
+  /** Drive model from sysfs, e.g. `CT1000MX500SSD1`. Empty when unavailable. */
+  model: string
+  sizeBytes: number
+  /** False for an SSD/NVMe, true for a spinning disk. */
+  rotational: boolean
+}
+
 /** Snapshot emitted by the container entrypoint as /storage.json (`df`). */
 export interface HostStorage {
   generatedAt: number
   host: string
   mounts: HostMount[]
+  /**
+   * True when the mount table came from the host itself (the host root is
+   * bind-mounted at /host), false when it is only this container's own mounts
+   * — in which case just the disk Docker sits on can be reported.
+   */
+  hostMounts?: boolean
+  /** Host mounts that exist but are not visible inside the container. */
+  hiddenMounts?: number
+  /** Every physical disk on the host, mounted or not. */
+  devices?: HostDevice[]
 }
 
 /** Mounts that share a physical disk, with that disk's totals. */

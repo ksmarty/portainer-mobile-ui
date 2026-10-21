@@ -145,11 +145,24 @@ labels:
 The dashboard's **Storage** dial and the **Drive info** screen show the disk the app (and, when it runs on the same host, Portainer) is using. The container entrypoint generates `/storage.json` from `df` and refreshes it every 15 seconds, so the numbers track live usage without an app rebuild:
 
 - The container root filesystem is the host's overlay backing store, so `df /` reports the **main drive** — that's the dial's default.
-- To also list the host's other partitions, bind-mount the host root into the container and the extra mounts appear on the Drive info screen. The app falls back to a demo snapshot when the file isn't served (local dev / preview).
+- **Every attached disk is listed, mounted or not.** `df` can only ever name filesystems that are in use, so the entrypoint also reads `/sys/class/block` — which is *not* namespaced — and reports every whole block device with its model, size and rotational flag. `/sys` is shared with the host even without a bind mount, which is why the spare SSD and the two unused 3 TB drives now appear next to the disk Docker lives on. A drive with no filesystem mounted shows its raw capacity and an `unmounted` chip instead of a usage bar.
+- Bind-mounting the host root (`- /:/host:ro,rslave`) additionally makes every *host* filesystem visible, so partitions on other disks show real used/free figures rather than capacity only. The app falls back to a demo snapshot when the file isn't served (local dev / preview).
 - The screen is **grouped by physical drive**, not by mount. One drive normally shows up several times in `df` (root overlay, an LVM volume, `/boot/efi`), so raw mounts report the same capacity repeatedly; the entrypoint resolves each filesystem to its backing disk via `/sys/class/block` (`nvme0n1p2` → `nvme0n1`, a device-mapper volume walks its `slaves`, a RAID set joins them as `sda+sdb`) and the UI folds those mounts into one card. A device-less root (the container's overlay) is folded into the physical group reporting identical capacity and usage, so it lands on the disk that actually backs it.
 - **Sizes are emitted in KiB, not bytes.** Busybox awk — the awk in the alpine nginx image — prints `%d` through a 32-bit int, so `kB * 1024` overflowed above ~2 GB and wrote negative byte counts, which the UI rendered as `NaN undefined`. KiB fits, and the frontend multiplies by 1024 in JS. `bytes()` also guards non-finite/negative input now, so no code path can print that string again.
 
 Docker's own storage breakdown (`docker system df` — images, containers, volumes, build cache and what's reclaimable) is shown on the same screen, summed from the active endpoint.
+
+## Container memory
+
+**Quick access → Container memory** ranks every container by RAM, highest first, with the total held by containers against host RAM and a "closest to limit" sort for the case where one container has a small limit and is sitting on it.
+
+Memory is a gauge rather than a counter, so one one-shot stats sample per container is enough — the requests go out in parallel and the whole ranking costs about as long as the slowest single container. Page cache is subtracted from `usage`, matching `docker stats`. Permissions match the rest of the app: Portainer's Docker proxy needs **read** access to container stats.
+
+## Updating a container
+
+The update dialog has a **Remove the old image afterwards** checkbox, checked by default. After the container is recreated from the newer image, the image it *was* running is deleted once nothing references it — otherwise each update leaves an untagged layer behind that `docker system df` counts forever.
+
+The delete is deliberately conservative: it re-lists containers first (a sibling container or a not-yet-rolled-over stack service may still be on that image), only ever removes the **old id**, and treats `404`/`409` as success. If the delete is refused for another reason the update still stands and a toast explains why the old image was kept.
 
 ## Image cleanup
 

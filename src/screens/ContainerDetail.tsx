@@ -37,6 +37,9 @@ export function ContainerDetailScreen({ id }: { id: string }) {
   const [fetchBusy, setFetchBusy] = useState(false)
   const [confirmUpdate, setConfirmUpdate] = useState(false)
   const [updateBusy, setUpdateBusy] = useState(false)
+  // Default true: keeping the previous image around just leaves an untagged
+  // layer on disk that nothing will ever use again.
+  const [removeOldImage, setRemoveOldImage] = useState(true)
   const [updateStep, setUpdateStep] = useState('')
   const [showImageInfo, setShowImageInfo] = useState(false)
 
@@ -228,11 +231,13 @@ export function ContainerDetailScreen({ id }: { id: string }) {
           stackName={stack?.Name}
           busy={updateBusy}
           step={updateStep}
+          removeOldImage={removeOldImage}
+          onToggleRemoveOldImage={setRemoveOldImage}
           onCancel={() => setConfirmUpdate(false)}
           onConfirm={() => {
             setUpdateBusy(true)
             setUpdateStep('')
-            void doUpdateContainer(id, setUpdateStep)
+            void doUpdateContainer(id, setUpdateStep, { removeOldImage })
               .catch(() => {})
               .finally(() => {
                 setUpdateBusy(false)
@@ -308,6 +313,8 @@ function UpdateConfirm({
   stackName,
   busy,
   step,
+  removeOldImage,
+  onToggleRemoveOldImage,
   onCancel,
   onConfirm,
 }: {
@@ -316,6 +323,8 @@ function UpdateConfirm({
   stackName?: string
   busy: boolean
   step: string
+  removeOldImage: boolean
+  onToggleRemoveOldImage: (on: boolean) => void
   onCancel: () => void
   onConfirm: () => void
 }) {
@@ -338,6 +347,21 @@ function UpdateConfirm({
             The container is recreated, so it gets a new id and a short outage while it restarts.
           </p>
         )}
+        <label className="check-row" style={{ margin: '0 0 14px' }}>
+          <input
+            type="checkbox"
+            checked={removeOldImage}
+            disabled={busy}
+            onChange={(e) => onToggleRemoveOldImage(e.target.checked)}
+          />
+          <span>
+            <span className="t">Remove the old image afterwards</span>
+            <span className="d">
+              The image the container runs today is deleted once it is unused, so the update does not leave an
+              untagged layer behind. Skipped if another container still needs it.
+            </span>
+          </span>
+        </label>
         {busy && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 9, margin: '0 0 14px' }}>
             <Spinner size={15} />

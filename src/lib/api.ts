@@ -1,5 +1,6 @@
 import {
   demoContainerAction,
+  demoContainerMemory,
   demoCreateContainer,
   demoDashboard,
   demoDanglingImages,
@@ -21,6 +22,7 @@ import {
 } from './demo'
 import type {
   Container,
+  ContainerMemory,
   DashboardStats,
   DockerDiskUsage,
   Endpoint,
@@ -249,7 +251,14 @@ export async function getStorage(): Promise<HostStorage | null> {
   try {
     const res = await fetch('/storage.json', { cache: 'no-store' })
     if (!res.ok) return null
-    const data = (await res.json()) as { generatedAt?: number; host?: string; mounts?: RawHostMount[] }
+    const data = (await res.json()) as {
+      generatedAt?: number
+      host?: string
+      mounts?: RawHostMount[]
+      hostMounts?: boolean
+      hiddenMounts?: number
+      devices?: { name?: string; model?: string; sizeKb?: number; sizeBytes?: number; rotational?: boolean }[]
+    }
     if (!data || !Array.isArray(data.mounts)) return null
     const mounts: HostMount[] = data.mounts.map((m) => {
       const totalBytes = kB(m.totalKb, m.totalBytes)
@@ -271,7 +280,21 @@ export async function getStorage(): Promise<HostStorage | null> {
         usedPercent: Math.max(0, Math.min(100, reported ?? computed)),
       }
     })
-    return { generatedAt: data.generatedAt || Date.now(), host: data.host || '', mounts }
+    return {
+      generatedAt: data.generatedAt || Date.now(),
+      host: data.host || '',
+      mounts,
+      hostMounts: data.hostMounts === true,
+      hiddenMounts: typeof data.hiddenMounts === 'number' ? data.hiddenMounts : 0,
+      devices: Array.isArray(data.devices)
+        ? data.devices.map((d) => ({
+            name: d.name || '',
+            model: d.model || '',
+            sizeBytes: kB(d.sizeKb, d.sizeBytes),
+            rotational: d.rotational !== false,
+          }))
+        : [],
+    }
   } catch {
     return null
   }
@@ -643,6 +666,41 @@ export function parseDockerLogs(raw: Uint8Array): LogLine[] {
     i += size
   }
   return lines
+}
+
+/**
+ * Memory footprint of every container on an endpoint, in one pass.
+ *
+ * A container's memory is a gauge, not a counter, so one one-shot stats sample
+ * per container is enough — unlike CPU, which needs two readings to diff. The
+ * requests are issued together so the ranking costs about as long as the
+ * slowest single container.
+ */
+export function getContainersMemory(endpointId: number): Promise<ContainerMemory[]> {
+  if (isDemo()) return demoDelay(demoContainerMemory(), 260)
+  return getContainers(endpointId, true).then((containers) =>
+    Promise.all(
+      containers.map(async (c) => {
+        const running = c.State === 'running'
+        const name = c.Names[0]?.replace(/^\//, '') || c.Id.slice(0, 12)
+        if (!running) return { id: c.Id, name, state: c.State, mem: 0, limit: 0, percent: 0 }
+        try {
+          const raw = await portainerFetch<any>(dockerPath(endpointId, `/containers/${c.Id}/stats`), {}, {
+            stream: 0,
+            'one-shot': 1,
+          })
+          // Docker counts page cache in `usage`; subtract it like `docker stats`.
+          const mem = Math.max(0, (raw?.memory_stats?.usage ?? 0) - (raw?.memory_stats?.stats?.cache ?? 0))
+          const limit = raw?.memory_stats?.limit ?? 0
+          return { id: c.Id, name, state: c.State, mem, limit, percent: limit > 0 ? (mem / limit) * 100 : 0 }
+        } catch {
+          // A container that stopped or vanished mid-sample is simply not
+          // ranked, rather than failing the whole screen.
+          return { id: c.Id, name, state: c.State, mem: 0, limit: 0, percent: 0 }
+        }
+      }),
+    ),
+  )
 }
 
 export function getContainerStats(endpointId: number, id: string): Promise<Stats> {
