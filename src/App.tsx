@@ -1,8 +1,10 @@
 import { useEffect, useRef } from 'react'
 import { useApp } from './store'
+import { releaseCleanup } from './lib/cleanup'
 import { TopBar } from './components/TopBar'
 import { TabBar } from './components/TabBar'
 import { Toasts } from './components/Toasts'
+import { CleanupProgress } from './components/CleanupProgress'
 import { HomeScreen } from './screens/Home'
 import { ContainersScreen } from './screens/Containers'
 import { ContainerDetailScreen } from './screens/ContainerDetail'
@@ -47,15 +49,41 @@ export default function App() {
   // and again whenever the tab returns to the foreground in case the browser
   // suspended the in-flight loop while it was hidden.
   const resumeImageCleanup = useApp((s) => s.resumeImageCleanup)
+  const syncCleanupFromStorage = useApp((s) => s.syncCleanupFromStorage)
   useEffect(() => {
     if (!ready) return
     void resumeImageCleanup()
     const onVisible = () => {
-      if (!document.hidden) void resumeImageCleanup()
+      if (document.hidden) return
+      void resumeImageCleanup()
+      syncCleanupFromStorage()
+    }
+    // Another tab writes progress (or a reload left a job behind): read it back
+    // so the strip keeps showing live numbers without owning the work.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'imageCleanupJob') syncCleanupFromStorage()
     }
     document.addEventListener('visibilitychange', onVisible)
-    return () => document.removeEventListener('visibilitychange', onVisible)
-  }, [ready, resumeImageCleanup])
+    window.addEventListener('storage', onStorage)
+    const timer = window.setInterval(() => {
+      if (document.hidden) return
+      syncCleanupFromStorage()
+      // Take over a job whose owner went away (a closed tab, a killed session):
+      // resumeImageCleanup() is a no-op unless the heartbeat has gone stale.
+      void resumeImageCleanup()
+    }, 4000)
+    // Hand ownership back the moment this page goes away, so a reload (or the
+    // user reopening the site) can continue the cleanup immediately instead of
+    // waiting for the heartbeat to expire.
+    const onPageHide = () => releaseCleanup()
+    window.addEventListener('pagehide', onPageHide)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('storage', onStorage)
+      window.removeEventListener('pagehide', onPageHide)
+      window.clearInterval(timer)
+    }
+  }, [ready, resumeImageCleanup, syncCleanupFromStorage])
 
   // Scroll to the top whenever the route changes (e.g. tapping a container in
   // a stack shouldn't inherit the stack page's scroll position).
@@ -102,6 +130,7 @@ export default function App() {
       {showTopBar && (
         <TopBar back={screen.name !== 'home'} right={screen.name === 'images' ? <ImageActions /> : undefined} />
       )}
+      <CleanupProgress />
       <div className="app-scroll" ref={scrollRef}>
         <Router />
       </div>

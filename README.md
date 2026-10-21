@@ -151,7 +151,23 @@ Docker's own storage breakdown (`docker system df` — images, containers, volum
 
 ## Image cleanup
 
-"Clean up unused images" on the Images screen removes dangling images **one at a time** in a background job that lives in the store, so it keeps running while you navigate — and it is mirrored to `localStorage` after every image, so closing the tab or reloading resumes it exactly where it left off. Progress shows as a banner on the Images screen and in the cleanup sheet.
+"Clean up unused images" on the Images screen removes dangling images **one at a time** in a background job that lives in the store, so it keeps running while you navigate — and it is mirrored to `localStorage` after every image, so closing the tab or reloading resumes it exactly where it left off.
+
+Because the job is fully decoupled from the UI:
+
+- **Progress is always visible.** A compact strip above the screen content tracks it from any screen, and the Images screen adds a detailed banner; tapping either opens Images. On a reload the job is rebuilt from storage, so the real numbers are there immediately.
+- **Ownership is leased, not locked.** Each tab claims the job and refreshes a heartbeat while it works. A closed or reloaded tab stops beating, and after ~12s (or immediately on `pagehide`, which fires on reload) the next tab takes over — so two tabs never delete the same image twice, and reopening the site continues the run.
+- **It can be cancelled.** The running banner's *Cancel* clears the persisted job; the loop notices between images and stops.
+- **Resumed steps don't double-count.** An image the previous owner already deleted comes back as `404`, which is counted as reclaimed instead of failed.
+
+## CPU dial
+
+Host CPU is a share of the whole host's CPU time, so the raw `docker stats` formula must **not** be multiplied by the core count — doing that pegged a lightly-busy host at 100% on open. On top of that:
+
+- Concurrent polls share one in-flight aggregation (the boot fetch and the 5s interval used to run separate nested polling loops and fight over the same state).
+- Each poll diffs a container's counters against its previous reading instead of sleeping between two samples, so the dial updates on every poll with no added latency. The first poll of a session primes the counters with one short 600ms second sample.
+- A sample far above the recent median (`> 4x` and `+45` points) is treated as the page-load burst and replaced by that median; the published value is a smoothed median of the last three samples.
+- If nothing could be measured, the previous reading is kept rather than dropping to 0%.
 
 ## CI & releases (GitHub Actions)
 

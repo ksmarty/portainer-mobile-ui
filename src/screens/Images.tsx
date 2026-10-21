@@ -166,6 +166,11 @@ function CleanupBanner() {
             Dismiss
           </button>
         )}
+        {running && (
+          <button className="link" onClick={dismissCleanup} style={{ color: 'var(--red)' }}>
+            Cancel
+          </button>
+        )}
       </div>
     </div>
   )

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import {
+  ApiError,
   clearConfig,
   clearCache,
   containerAction,
@@ -46,7 +47,7 @@ import type { PullResult } from './lib/api'
 import { extractComposeImages, composeImageForService } from './lib/compose'
 import { resolveContainerImage, stackForContainer } from './lib/containerRefs'
 import { demoAddEndpoint, demoAddTeam, demoAddUser, demoHostStorage, demoRemoveTeam, demoRemoveUser } from './lib/demo'
-import { loadCleanupJob, saveCleanupJob, clearCleanupJob } from './lib/cleanup'
+import { loadCleanupJob, beatCleanup, claimCleanup, releaseCleanup, readCleanupJob, clearCleanupJob } from './lib/cleanup'
 import type {
   CleanupJob,
   Container,
@@ -128,6 +129,7 @@ interface AppState {
   loadDiskUsage: () => Promise<void>
   startImageCleanup: () => Promise<void>
   resumeImageCleanup: () => Promise<void>
+  syncCleanupFromStorage: () => void
   dismissCleanup: () => void
   toast: (message: string, kind?: Toast['kind']) => void
   dismissToast: (id: string) => void
@@ -205,32 +207,60 @@ async function runCleanupJob(
   initial: CleanupJob,
   set: (partial: Partial<AppState>) => void,
   get: () => AppState,
-): Promise<void> {
-  if (cleanupRunning) return
+): Promise<boolean> {
+  if (cleanupRunning) return false
+  // Claim the job before touching anything: another tab may already be working
+  // through the same images. A tab that was closed (or reloaded) stops beating,
+  // so this returns true for it once the heartbeat goes stale — that is how a
+  // reopened site picks the job back up instead of stalling it forever.
+  if (!claimCleanup()) return false
   cleanupRunning = true
   let job: CleanupJob = { ...initial, status: 'running', remaining: [...initial.remaining] }
   set({ cleanupJob: job })
-  saveCleanupJob(job)
+  beatCleanup(job)
   const ep = job.endpointId
+  // Keep the lease alive while a single large image is being deleted — one
+  // removal can easily outlast the stale window, and another tab must not grab
+  // the job mid-step.
+  const heartbeat = window.setInterval(() => beatCleanup(), 4000)
 
-  while (job.remaining.length > 0) {
+  // Notice a job cancelled/cleared from another tab instead of deleting images
+  // the user no longer asked for.
+  while (job.remaining.length > 0 && readCleanupJob() !== null) {
     const item = job.remaining[0]
     try {
       await removeImage(ep, item.id, true)
       job = { ...job, reclaimed: job.reclaimed + item.size, done: job.done + 1 }
-    } catch {
-      job = { ...job, failed: job.failed + 1, done: job.done + 1 }
+    } catch (e) {
+      // A job persisted mid-step across a reload (or a tab that dies after the
+      // DELETE reaches Docker but before the response) will retry an image that
+      // is already gone. Treat "not found" as reclaimed instead of failed, so a
+      // resumed cleanup doesn't report phantom failures.
+      if (e instanceof ApiError && e.status === 404) {
+        job = { ...job, reclaimed: job.reclaimed + item.size, done: job.done + 1 }
+      } else {
+        job = { ...job, failed: job.failed + 1, done: job.done + 1 }
+      }
     }
     job = { ...job, remaining: job.remaining.slice(1) }
     set({ cleanupJob: job })
-    saveCleanupJob(job)
+    beatCleanup(job)
+  }
+
+  // A cleared job means the user cancelled it elsewhere — drop ours in step.
+  window.clearInterval(heartbeat)
+  if (readCleanupJob() === null) {
+    set({ cleanupJob: null })
+    cleanupRunning = false
+    releaseCleanup()
+    return true
   }
 
   const removed = job.total - job.failed
   job = { ...job, status: job.failed && !job.reclaimed ? 'error' : 'done', finishedAt: Date.now() }
   set({ cleanupJob: job })
-  saveCleanupJob(job)
   cleanupRunning = false
+  releaseCleanup(job)
 
   if (job.failed === 0) {
     get().toast(`Freed ${bytes(job.reclaimed)} (${removed} image${removed === 1 ? '' : 's'})`, 'success')
@@ -242,6 +272,7 @@ async function runCleanupJob(
   // The list changed under us — pull the fresh image list so the Images screen
   // reflects what was deleted.
   void get().refresh()
+  return true
 }
 
 export const useApp = create<AppState>((set, get) => ({
@@ -716,24 +747,52 @@ export const useApp = create<AppState>((set, get) => ({
       totalBytes: dangling.reduce((s, i) => s + (i.Size || 0), 0),
       startedAt: Date.now(),
     }
-    void runCleanupJob(job, set as (p: Partial<AppState>) => void, get)
+    void runCleanupJob(job, set as (p: Partial<AppState>) => void, get).then((started) => {
+      if (started) return
+      // Another tab owns the job. Point the user at it rather than silently
+      // doing nothing, and mirror its progress into this tab.
+      const other = readCleanupJob()
+      if (other?.status === 'running') {
+        set({ cleanupJob: other })
+        get().toast('A cleanup is already running in another tab', 'info')
+      }
+    })
   },
 
   // Rebuild a persisted "running" job after a reload and finish the images that
   // were still pending. Called on boot and when the app regains focus.
   resumeImageCleanup: async () => {
     if (cleanupRunning) return
-    const job = get().cleanupJob
-    if (!job || job.status !== 'running') return
+    // Prefer the persisted job: another tab (or this tab before a reload) may
+    // have advanced it further than the value this tab booted with.
+    const job = readCleanupJob() ?? get().cleanupJob
+    if (!job || job.status !== 'running') {
+      if (!job && get().cleanupJob) set({ cleanupJob: null })
+      return
+    }
     // The job carries its own endpoint, and deletion targets that endpoint, so
     // it can safely resume even if the active endpoint changed since the reload.
-    void runCleanupJob(job, set as (p: Partial<AppState>) => void, get)
+    // This runs on a timer, so a failure to claim (another live tab owns it) is
+    // silent — the storage mirror already keeps this tab's progress current.
+    void runCleanupJob(job, set as (p: Partial<AppState>) => void, get).then((started) => {
+      if (!started) set({ cleanupJob: readCleanupJob() })
+    })
   },
 
+  // Clears the job. If it is still running this cancels it: the loop checks the
+  // persisted job between images and stops, so nothing is deleted after the
+  // user asked it to stop.
   dismissCleanup: () => {
-    if (get().cleanupJob?.status === 'running') return
     clearCleanupJob()
     set({ cleanupJob: null })
+  },
+
+  // Mirror a job another tab is running (or one this tab just reloaded into)
+  // so the progress strip shows real numbers without owning the work.
+  syncCleanupFromStorage: () => {
+    if (cleanupRunning) return
+    const stored = readCleanupJob()
+    set({ cleanupJob: stored })
   },
 
   doRemoveVolume: async (name) => {

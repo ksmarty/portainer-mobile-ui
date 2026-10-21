@@ -238,86 +238,156 @@ export async function getStorage(): Promise<HostStorage | null> {
 // The dashboard reports host-wide CPU/memory for every endpoint. CPU is a
 // percentage of the whole host, so it must NOT be scaled by the core count —
 // scaling by `cpus` inflated a lightly-busy host to a hard 100% on open.
-// A tiny exponential moving average keeps a single noisy sample from spiking
-// the dial while still tracking real changes within a second or two.
+//
+// Three guards keep the dial honest, especially on a cold open:
+//  1. concurrent pollers share one in-flight computation (the boot fetch and the
+//     screen's interval used to race, each running its own nested polling loop),
+//  2. each poll diffs against the previous counters instead of sleeping between
+//     two samples, so the dial updates on every poll with no added latency,
+//  3. a spike far above the recent median is treated as the page-load burst and
+//     replaced by that median, and the published value is itself a smoothed
+//     median of the last few samples.
 let smoothCpu: number | null = null
+let cpuSamples: number[] = []
+let dashboardInFlight: Promise<DashboardStats> | null = null
+// Last CPU-time counters per container, so each poll can be diffed against the
+// previous one instead of paying for two samples.
+const lastUsage = new Map<string, { total: number; sys: number }>()
 
 export function getDashboard(): Promise<DashboardStats> {
   if (isDemo()) return demoDelay(demoDashboard(), 220)
-  return (async () => {
-    const eps = await getEndpoints()
-    const total: DashboardStats = {
-      endpoints: eps.length,
-      stacks: 0,
-      containersRunning: 0,
-      containersStopped: 0,
-      images: 0,
-      volumes: 0,
-      networks: 0,
-      cpu: 0,
-      memory: 0,
-      memoryUsed: 0,
-      memoryTotal: 0,
-    }
-    const stacksP = getStacks()
-    for (const ep of eps.filter((e) => e.Status === 1)) {
-      try {
-        const [containers, images, volumes, networks, info] = await Promise.all([
-          getContainers(ep.Id, true),
-          getImages(ep.Id),
-          getVolumes(ep.Id),
-          getNetworks(ep.Id),
-          // System totals: CPU count and total memory for this endpoint host
-          portainerFetch<{ NCPU?: number; MemTotal?: number }>(dockerPath(ep.Id, '/info')),
-        ])
-        total.containersRunning += containers.filter((c) => c.State === 'running').length
-        total.containersStopped += containers.filter((c) => c.State !== 'running').length
-        total.images += images.length
-        total.volumes += volumes.length
-        total.networks += networks.length
-        total.memoryTotal += info.MemTotal || 0
-        // Live CPU + memory usage. One-shot stats report precpu_stats equal to
-        // cpu_stats (delta 0), so sample twice a short interval apart and diff
-        // them. Keep the window tight (~800ms) so the dial reacts quickly.
-        const running = containers.filter((c) => c.State === 'running')
-        if (running.length > 0) {
-          const ids = running.map((c) => c.Id)
-          const a = await sampleContainerUsage(ep.Id, ids)
-          await new Promise((r) => setTimeout(r, 800))
-          const b = await sampleContainerUsage(ep.Id, ids)
-          for (let k = 0; k < b.length; k++) {
-            const dTotal = b[k].total - a[k].total
-            const dSys = b[k].sys - a[k].sys
-            // Fraction of the whole host's CPU time used by this container —
-            // the raw docker-stats formula scaled by core count would read
-            // Nx too high and peg the gauge at 100%.
-            if (dSys > 0 && dTotal >= 0) total.cpu += (dTotal / dSys) * 100
-            total.memoryUsed += b[k].mem
+  // Dedupe: the home screen polls every 5s and a full aggregation takes ~1s, so
+  // without this a slow endpoint stacks up runs that fight over the same state.
+  if (dashboardInFlight) return dashboardInFlight
+  const run = computeDashboard().finally(() => {
+    if (dashboardInFlight === run) dashboardInFlight = null
+  })
+  dashboardInFlight = run
+  return run
+}
+
+async function computeDashboard(): Promise<DashboardStats> {
+  const eps = await getEndpoints()
+  const total: DashboardStats = {
+    endpoints: eps.length,
+    stacks: 0,
+    containersRunning: 0,
+    containersStopped: 0,
+    images: 0,
+    volumes: 0,
+    networks: 0,
+    cpu: 0,
+    memory: 0,
+    memoryUsed: 0,
+    memoryTotal: 0,
+  }
+  const stacksP = getStacks()
+  let measured = false
+  for (const ep of eps.filter((e) => e.Status === 1)) {
+    try {
+      const [containers, images, volumes, networks, info] = await Promise.all([
+        getContainers(ep.Id, true),
+        getImages(ep.Id),
+        getVolumes(ep.Id),
+        getNetworks(ep.Id),
+        // System totals: CPU count and total memory for this endpoint host
+        portainerFetch<{ NCPU?: number; MemTotal?: number }>(dockerPath(ep.Id, '/info')),
+      ])
+      total.containersRunning += containers.filter((c) => c.State === 'running').length
+      total.containersStopped += containers.filter((c) => c.State !== 'running').length
+      total.images += images.length
+      total.volumes += volumes.length
+      total.networks += networks.length
+      total.memoryTotal += info.MemTotal || 0
+      // Live CPU + memory usage. One-shot stats report precpu_stats equal to
+      // cpu_stats (delta 0), so a percentage has to come from two readings.
+      // Rather than sleeping between two samples (which made a poll cost 1-2s
+      // and lag behind the screen), remember each container's last counters and
+      // diff against them: every poll then yields a fresh percentage for the
+      // interval that just elapsed, with no extra latency.
+      const running = containers.filter((c) => c.State === 'running')
+      if (running.length > 0) {
+        const ids = running.map((c) => c.Id)
+        const now = await sampleContainerUsage(ep.Id, ids)
+        for (let k = 0; k < now.length; k++) {
+          const cur = now[k]
+          const prev = lastUsage.get(cur.key)
+          lastUsage.set(cur.key, { total: cur.total, sys: cur.sys })
+          total.memoryUsed += cur.mem
+          if (!prev) continue
+          const dTotal = cur.total - prev.total
+          const dSys = cur.sys - prev.sys
+          // Fraction of the whole host's CPU time used by this container — the
+          // raw docker-stats formula scaled by core count would read Nx too
+          // high and peg the gauge at 100%.
+          if (dSys > 0 && dTotal >= 0) {
+            total.cpu += (dTotal / dSys) * 100
+            measured = true
           }
         }
-      } catch {
-        // skip unreachable endpoint
+        // First poll of the session: there is no previous reading to diff
+        // against, so prime it with one short second sample (600ms) instead of
+        // waiting a whole poll interval before the dial shows anything.
+        if (!measured) {
+          await new Promise((r) => setTimeout(r, 600))
+          const later = await sampleContainerUsage(ep.Id, ids)
+          for (let k = 0; k < later.length; k++) {
+            const cur = later[k]
+            const prev = lastUsage.get(cur.key)
+            lastUsage.set(cur.key, { total: cur.total, sys: cur.sys })
+            if (!prev) continue
+            const dSys = cur.sys - prev.sys
+            const dTotal = cur.total - prev.total
+            if (dSys > 0 && dTotal >= 0) {
+              total.cpu += (dTotal / dSys) * 100
+              measured = true
+            }
+          }
+        }
       }
+    } catch {
+      // skip unreachable endpoint
     }
-    total.stacks = (await stacksP).length
-    total.cpu = Math.min(100, Math.max(0, total.cpu))
-    // Smooth the CPU across polls so a momentary burst doesn't flash 100%.
-    smoothCpu = smoothCpu === null ? total.cpu : smoothCpu * 0.5 + total.cpu * 0.5
-    total.cpu = Math.round(smoothCpu)
-    total.memory =
-      total.memoryTotal > 0 ? Math.min(100, Math.round((total.memoryUsed / total.memoryTotal) * 100)) : 0
+  }
+  total.stacks = (await stacksP).length
+  total.cpu = Math.min(100, Math.max(0, total.cpu))
+  // No container usage was measured (first poll of the session, or no running
+  // containers): keep the previous reading rather than dropping to 0.
+  if (!measured) {
+    total.cpu = Math.round(smoothCpu ?? 0)
+    total.memory = total.memoryTotal > 0 ? Math.min(100, Math.round((total.memoryUsed / total.memoryTotal) * 100)) : 0
     return total
-  })()
+  }
+  // Reject a page-load burst: a first sample that is far above the recent
+  // median (while the host itself is idling) is the cost of loading this very
+  // page, not sustained load. Then publish the median of the last three
+  // samples, lightly smoothed, so one noisy poll can neither peg the dial nor
+  // make it twitch.
+  if (cpuSamples.length >= 2) {
+    const soFar = [...cpuSamples].sort((a, b) => a - b)
+    const prevMedian = soFar[Math.floor(soFar.length / 2)]
+    if (total.cpu > Math.max(prevMedian * 4, prevMedian + 45)) total.cpu = prevMedian
+  }
+  cpuSamples.push(total.cpu)
+  if (cpuSamples.length > 3) cpuSamples.shift()
+  const sorted = [...cpuSamples].sort((a, b) => a - b)
+  const median = sorted[Math.floor(sorted.length / 2)]
+  smoothCpu = smoothCpu === null ? median : smoothCpu * 0.4 + median * 0.6
+  total.cpu = Math.round(smoothCpu)
+  total.memory =
+    total.memoryTotal > 0 ? Math.min(100, Math.round((total.memoryUsed / total.memoryTotal) * 100)) : 0
+  return total
 }
 
 async function sampleContainerUsage(
   endpointId: number,
   ids: string[],
-): Promise<{ total: number; sys: number; cpus: number; mem: number }[]> {
+): Promise<{ key: string; total: number; sys: number; cpus: number; mem: number }[]> {
   return Promise.all(
     ids.map((id) =>
       portainerFetch<any>(dockerPath(endpointId, `/containers/${id}/stats`), {}, { stream: 0, 'one-shot': 1 }).then(
         (raw) => ({
+          key: `${endpointId}/${id}`,
           total: raw.cpu_stats?.cpu_usage?.total_usage ?? 0,
           sys: raw.cpu_stats?.system_cpu_usage ?? 0,
           cpus: raw.cpu_stats?.online_cpus || 1,
