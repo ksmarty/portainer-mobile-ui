@@ -208,6 +208,11 @@ export interface DashboardStats {
 export interface HostMount {
   filesystem: string
   mountpoint: string
+  /**
+   * Physical disk(s) back this mount — `nvme0n1`, or `sda+sdb` for a RAID set.
+   * Empty for pseudo filesystems (overlay, tmpfs, shm), which carry no device.
+   */
+  disk: string
   totalBytes: number
   usedBytes: number
   availBytes: number
@@ -219,6 +224,17 @@ export interface HostStorage {
   generatedAt: number
   host: string
   mounts: HostMount[]
+}
+
+/** Mounts that share a physical disk, with that disk's totals. */
+export interface DiskGroup {
+  /** Physical disk id, e.g. `nvme0n1`, or the mount's filesystem when it has no device. */
+  id: string
+  mounts: HostMount[]
+  totalBytes: number
+  usedBytes: number
+  availBytes: number
+  usedPercent: number
 }
 
 /** `docker system df` totals for one endpoint (reclaimable Docker storage). */

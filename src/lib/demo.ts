@@ -516,10 +516,10 @@ export function demoHostStorage(): HostStorage {
     generatedAt: Date.now(),
     host: 'demo-host',
     mounts: [
-      { filesystem: '/dev/nvme0n1p2', mountpoint: '/', totalBytes: gb(494), usedBytes: gb(213), availBytes: gb(281), usedPercent: 43 },
-      { filesystem: '/dev/nvme0n1p1', mountpoint: '/boot/efi', totalBytes: mb(512), usedBytes: mb(63), availBytes: mb(449), usedPercent: 12 },
-      { filesystem: '/dev/sda1', mountpoint: '/mnt/backups', totalBytes: gb(3726), usedBytes: gb(1204), availBytes: gb(2522), usedPercent: 32 },
-      { filesystem: 'tmpfs', mountpoint: '/run', totalBytes: mb(780), usedBytes: mb(2), availBytes: mb(778), usedPercent: 0 },
+      { filesystem: '/dev/nvme0n1p2', mountpoint: '/', disk: 'nvme0n1', totalBytes: gb(494), usedBytes: gb(213), availBytes: gb(281), usedPercent: 43 },
+      { filesystem: '/dev/nvme0n1p1', mountpoint: '/boot/efi', disk: 'nvme0n1', totalBytes: mb(512), usedBytes: mb(63), availBytes: mb(449), usedPercent: 12 },
+      { filesystem: '/dev/sda1', mountpoint: '/mnt/backups', disk: 'sda', totalBytes: gb(3726), usedBytes: gb(1204), availBytes: gb(2522), usedPercent: 32 },
+      { filesystem: 'tmpfs', mountpoint: '/run', disk: '', totalBytes: mb(780), usedBytes: mb(2), availBytes: mb(778), usedPercent: 0 },
     ],
   }
 }

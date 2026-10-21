@@ -106,32 +106,108 @@ EOF
 # `df /` reports the main drive; any extra host partitions appear when the host
 # root is bind-mounted into /host. Refresh happens on a loop so the numbers
 # track live usage without an app rebuild.
+#
+# Sizes are emitted in KiB, never in bytes: busybox awk (the awk in the alpine
+# nginx image) prints %d through a 32-bit int, so `kB * 1024` overflowed at
+# ~2 GB and produced negative byte counts — which the UI rendered as
+# "NaN undefined". KiB stays well inside the range for any real disk, and the
+# frontend multiplies by 1024 in JS where the numbers are doubles.
 STORAGE=/usr/share/nginx/html/storage.json
+
+# Map a df filesystem to its kernel block-device name. df reports whatever the
+# mount table says — /dev/nvme0n1p2, /dev/mapper/vg-lv, /dev/md127, or nothing
+# at all for overlay/tmpfs. Only real block devices have a physical disk.
+block_name() {
+    _fs=$1
+    _base=$(basename "$_fs")
+    # Fast path: the node name is the kernel name (sda1, nvme0n1p2, md127).
+    if [ -e "/sys/class/block/$_base" ]; then
+        echo "$_base"
+        return
+    fi
+    # /dev/mapper/<name> is a device-mapper alias; sysfs stores the same name
+    # (with '-' escaped as '--') under dm/name for the dm-N device.
+    case "$_fs" in
+        /dev/mapper/*)
+            for _d in /sys/class/block/dm-*; do
+                [ -e "$_d/dm/name" ] || continue
+                if [ "$(cat "$_d/dm/name" 2>/dev/null)" = "$_base" ]; then
+                    basename "$_d"
+                    return
+                fi
+            done
+            ;;
+    esac
+    echo ""
+}
+
+# Resolve a kernel block device to the physical disk(s) behind it, so partitions,
+# LVM volumes and RAID arrays on the same drive can be grouped:
+#   nvme0n1p2                      -> nvme0n1
+#   dm-0 (over nvme0n1p3)          -> nvme0n1   (walks /sys/class/block/*/slaves)
+#   md127 (sda1 + sdb1)            -> sda+sdb
+phys_disk() {
+    _queue=$1
+    _out=""
+    _i=0
+    while [ -n "$_queue" ]; do
+        _i=$((_i + 1))
+        [ "$_i" -gt 32 ] && break
+        set -- $_queue
+        _q=$1
+        shift
+        _queue=$*
+        _dir="/sys/class/block/$_q"
+        [ -e "$_dir" ] || continue
+        # Logical devices (dm/md/loop) list their backing devices as slaves:
+        # walk down to them until a leaf is reached.
+        if [ -d "$_dir/slaves" ] && [ -n "$(ls -A "$_dir/slaves" 2>/dev/null)" ]; then
+            for _sl in $(ls "$_dir/slaves"); do
+                _queue="$_queue $_sl"
+            done
+            continue
+        fi
+        # A partition (sda1, nvme0n1p2) names its parent disk via 'partition'.
+        if [ -e "$_dir/partition" ]; then
+            _out="$_out $(basename "$(dirname "$(readlink -f "$_dir")")")"
+        else
+            _out="$_out $_q"
+        fi
+    done
+    # Sorted, de-duplicated, joined with "+" (a RAID1 over two disks keeps both).
+    echo $_out | tr ' ' '\n' | sed '/^$/d' | sort -u | tr '\n' '+' | sed 's/+$//'
+}
 
 gen_storage() {
     TMP="${STORAGE}.tmp"
     HOST="$(hostname)"
     NOW="$(date +%s)000"
-    { df -kP 2>/dev/null || df -k 2>/dev/null; } | awk -v host="$HOST" -v now="$NOW" '
-        function esc(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return s }
-        BEGIN { printf "{\"generatedAt\":%s,\"host\":\"%s\",\"mounts\":[", now, esc(host); first = 1 }
-        NR == 1 { next }
-        {
-            total = $2 + 0
-            if (total <= 0) next
-            used = $3 + 0
-            avail = $4 + 0
-            cap = $5; gsub(/%/, "", cap)
-            mount = ""
-            for (i = 6; i <= NF; i++) mount = mount (i > 6 ? " " : "") $i
-            if (mount == "") next
-            if (!first) printf ","
-            first = 0
-            printf "\n  {\"filesystem\":\"%s\",\"mountpoint\":\"%s\",\"totalBytes\":%d,\"usedBytes\":%d,\"availBytes\":%d,\"usedPercent\":%d}",
-                esc($1), esc(mount), total * 1024, used * 1024, avail * 1024, cap + 0
-        }
-        END { if (!first) printf "\n"; printf "]}"; printf "\n" }
-    ' > "$TMP" 2>/dev/null && mv "$TMP" "$STORAGE"
+    {
+        printf '{"generatedAt":%s,"host":"%s","mounts":[' "$NOW" "$(printf '%s' "$HOST" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+        FIRST=1
+        { df -kP 2>/dev/null || df -k 2>/dev/null; } | while read -r FS TOTAL USED AVAIL CAP MOUNT _REST; do
+            # Skip the header and any line without a numeric total.
+            case "$TOTAL" in ''|*[!0-9]*) continue ;; esac
+            [ "$TOTAL" -le 0 ] 2>/dev/null && continue
+            [ -n "$MOUNT" ] || continue
+            # df -P escapes spaces in the mount point as \040.
+            MOUNT=$(printf '%s' "$MOUNT" | sed 's/\\040/ /g')
+            PCT=$(printf '%s' "$CAP" | tr -cd '0-9')
+            [ -n "$PCT" ] || PCT=0
+            DISK=""
+            BN=$(block_name "$FS")
+            if [ -n "$BN" ]; then
+                DISK=$(phys_disk "$BN")
+            fi
+            if [ "$FIRST" = 0 ]; then printf ','; fi
+            FIRST=0
+            printf '\n{"filesystem":"%s","mountpoint":"%s","disk":"%s","totalKb":%s,"usedKb":%s,"availKb":%s,"usedPercent":%s}' \
+                "$(printf '%s' "$FS" | sed 's/\\/\\\\/g; s/"/\\"/g')" \
+                "$(printf '%s' "$MOUNT" | sed 's/\\/\\\\/g; s/"/\\"/g')" \
+                "$DISK" "$TOTAL" "$USED" "$AVAIL" "$PCT"
+        done
+        printf '\n]}\n'
+    } > "$TMP" 2>/dev/null && mv "$TMP" "$STORAGE"
     return 0
 }
 

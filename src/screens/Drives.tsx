@@ -2,8 +2,8 @@ import { useEffect } from 'react'
 import { useApp } from '../store'
 import { IconDrive } from '../components/Icons'
 import { Empty, SectionTitle, Skeleton } from '../components/ui'
-import { bytes } from '../lib/utils'
-import type { HostMount } from '../lib/types'
+import { bytes, groupByDisk } from '../lib/utils'
+import type { DiskGroup, HostMount } from '../lib/types'
 
 // Colour a system by how full it is: comfortable, getting tight, or nearly full.
 function usageColor(pct: number): string {
@@ -25,28 +25,31 @@ export function DrivesScreen() {
     void loadDiskUsage()
   }, [refreshStorage, loadDiskUsage])
 
-  // Root filesystem first (that's the "main drive"), then the rest by size.
-  const mounts = [...(storage?.mounts ?? [])].sort((a, b) => {
-    if (a.mountpoint === '/') return -1
-    if (b.mountpoint === '/') return 1
-    return b.totalBytes - a.totalBytes
-  })
-  const totalBytes = mounts.reduce((s, m) => s + m.totalBytes, 0)
-  const usedBytes = mounts.reduce((s, m) => s + m.usedBytes, 0)
+  // Grouped by physical drive: one drive is usually mounted several times
+  // (root, /boot/efi, an LVM volume), so listing raw mounts repeats the same
+  // capacity over and over.
+  const groups = groupByDisk(storage?.mounts ?? [])
+  const disks = groups.filter((g) => g.mounts.some((m) => !!m.disk))
+  const pseudo = groups.filter((g) => !g.mounts.some((m) => !!m.disk))
 
   return (
     <div className="page">
       {storage && (
-        <div className="card" style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
+        <div
+          className="card"
+          style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}
+        >
+          <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 12, color: 'var(--text-faint)', fontWeight: 600 }}>Host</div>
-            <div className="mono" style={{ fontSize: 12.5, marginTop: 1 }}>{storage.host}</div>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 12, color: 'var(--text-faint)', fontWeight: 600 }}>Across all filesystems</div>
-            <div style={{ fontSize: 12.5, marginTop: 1 }}>
-              {bytes(usedBytes)} used of {bytes(totalBytes)}
+            <div className="mono" style={{ fontSize: 12.5, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {storage.host || 'unknown'}
             </div>
+          </div>
+          <div style={{ textAlign: 'right', flex: 'none' }}>
+            <div style={{ fontSize: 12, color: 'var(--text-faint)', fontWeight: 600 }}>
+              {disks.length} {disks.length === 1 ? 'drive' : 'drives'}
+            </div>
+            <div style={{ fontSize: 12.5, marginTop: 1 }}>{groups.length} filesystems</div>
           </div>
         </div>
       )}
@@ -63,8 +66,8 @@ export function DrivesScreen() {
 
       {!storage && storageLoading && (
         <div className="card-list">
-          <Skeleton h={86} />
-          <Skeleton h={86} />
+          <Skeleton h={112} />
+          <Skeleton h={112} />
         </div>
       )}
 
@@ -76,12 +79,25 @@ export function DrivesScreen() {
         />
       )}
 
-      {storage && (
+      {storage && !groups.length && <Empty icon={<IconDrive size={36} />} title="No filesystems reported" />}
+
+      {disks.length > 0 && (
         <div className="card-list">
-          {mounts.map((m) => (
-            <MountRow key={m.filesystem + m.mountpoint} mount={m} />
+          {disks.map((g) => (
+            <DiskCard key={g.id} group={g} />
           ))}
         </div>
+      )}
+
+      {pseudo.length > 0 && (
+        <>
+          <SectionTitle>Virtual filesystems</SectionTitle>
+          <div className="card-list">
+            {pseudo.map((g) => (
+              <DiskCard key={g.id} group={g} virtual />
+            ))}
+          </div>
+        </>
       )}
 
       {diskUsage && (
@@ -101,40 +117,78 @@ export function DrivesScreen() {
 
       {!demo && (
         <div style={{ fontSize: 11, color: 'var(--text-faint)', margin: '12px 2px 0', lineHeight: 1.5 }}>
-          Drive usage is read from the host running this app (and Portainer). Docker storage is summed from
-          the active endpoint's images, containers, volumes and build cache.
+          Drive usage is read from the host running this app (and Portainer). Partitions, LVM volumes and RAID
+          members are grouped under the physical disk they live on. Docker storage is summed from the active
+          endpoint's images, containers, volumes and build cache.
         </div>
       )}
     </div>
   )
 }
 
-function MountRow({ mount }: { mount: HostMount }) {
-  const pct = Math.max(0, Math.min(100, mount.usedPercent))
+function DiskCard({ group, virtual }: { group: DiskGroup; virtual?: boolean }) {
+  const pct = Math.round(Math.max(0, Math.min(100, group.usedPercent)))
   const color = usageColor(pct)
-  const isRoot = mount.mountpoint === '/'
+  const root = group.mounts.find((m) => m.mountpoint === '/')
   return (
     <div className="card">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
           <IconDrive size={16} style={{ color, flex: 'none' }} />
-          <span className="mono" style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {mount.mountpoint}
+          <span className="mono" style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {group.id}
           </span>
-          {isRoot && <span className="chip" style={{ padding: '1px 6px' }}>main</span>}
+          {root && (
+            <span className="chip" style={{ padding: '1px 6px' }}>
+              main
+            </span>
+          )}
+          {virtual && (
+            <span className="chip" style={{ padding: '1px 6px', opacity: 0.75 }}>
+              virtual
+            </span>
+          )}
         </div>
         <span style={{ fontWeight: 800, fontSize: 15, color, flex: 'none' }}>{pct}%</span>
       </div>
+
       <div className="bar" style={{ marginTop: 8 }}>
         <div style={{ width: `${pct}%`, background: color }} />
       </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-faint)', marginTop: 6 }}>
-        <span className="mono">{mount.filesystem}</span>
-        <span>
-          {bytes(mount.usedBytes)} / {bytes(mount.totalBytes)}
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, marginTop: 7 }}>
+        <span style={{ color: 'var(--text-dim)' }}>
+          {bytes(group.usedBytes)} used of {bytes(group.totalBytes)}
         </span>
+        <span style={{ color: 'var(--text-faint)' }}>{bytes(group.availBytes)} free</span>
       </div>
-      <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>{bytes(mount.availBytes)} free</div>
+
+      {/* The individual filesystems on this disk, so a LVM root and its /boot
+          are still identifiable without their capacities fighting for space. */}
+      {group.mounts.length > 1 && (
+        <div style={{ marginTop: 9, borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+          {group.mounts.map((m) => (
+            <SubMount key={m.filesystem + m.mountpoint} mount={m} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SubMount({ mount }: { mount: HostMount }) {
+  const pct = Math.round(Math.max(0, Math.min(100, mount.usedPercent)))
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '3px 0' }}>
+      <span
+        className="mono"
+        style={{ fontSize: 11.5, color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+      >
+        {mount.mountpoint}
+      </span>
+      <span style={{ fontSize: 11, color: 'var(--text-faint)', flex: 'none' }}>
+        {bytes(mount.usedBytes)} / {bytes(mount.totalBytes)} · {pct}%
+      </span>
     </div>
   )
 }

@@ -14,6 +14,14 @@ import {
   IconWifi,
 } from '../components/Icons'
 import { Ring, ListItem, SectionTitle, Skeleton, useAnimatedNumber } from '../components/ui'
+import { groupByDisk } from '../lib/utils'
+
+// Capacity in GB, with a decimal below 100 so a 60 GB volume doesn't round to
+// "60 / 60" and look full.
+function formatGb(gb: number): string {
+  if (!isFinite(gb) || gb <= 0) return '0'
+  return gb >= 100 ? gb.toFixed(0) : gb.toFixed(1)
+}
 
 export function HomeScreen() {
   const dashboard = useApp((s) => s.dashboard)
@@ -57,15 +65,15 @@ export function HomeScreen() {
   const usedGb = dashboard?.memoryUsed ? (animatedMemUsed / 1073741824).toFixed(1) : '0'
   const totalGb = dashboard.memoryTotal ? (dashboard.memoryTotal / 1073741824).toFixed(0) : '16'
 
-  // The "main drive" is whatever filesystem carries the container root (`/`),
-  // which is also the disk Portainer itself runs on. Fall back to the largest
-  // mount when `/` isn't listed.
-  const rootMount =
-    storage?.mounts.find((m) => m.mountpoint === '/') ||
-    [...(storage?.mounts ?? [])].sort((a, b) => b.totalBytes - a.totalBytes)[0]
-  const storagePct = rootMount ? Math.max(0, Math.min(100, rootMount.usedPercent)) : 0
-  const storageUsedGb = rootMount ? (rootMount.usedBytes / 1073741824).toFixed(0) : '0'
-  const storageTotalGb = rootMount ? (rootMount.totalBytes / 1073741824).toFixed(0) : '0'
+  // The "main drive" is the physical disk carrying the container root (`/`) —
+  // also the disk Portainer itself runs on. Grouping matters here: the same
+  // drive is usually mounted several times (root overlay, LVM volume, /boot),
+  // and reporting a raw mount would count it more than once.
+  const groups = groupByDisk(storage?.mounts ?? [])
+  const rootGroup = groups.find((g) => g.mounts.some((m) => m.mountpoint === '/')) ?? groups[0]
+  const storagePct = rootGroup ? Math.round(Math.max(0, Math.min(100, rootGroup.usedPercent))) : 0
+  const storageUsedGb = rootGroup ? rootGroup.usedBytes / 1073741824 : 0
+  const storageTotalGb = rootGroup ? rootGroup.totalBytes / 1073741824 : 0
 
   return (
     <div className="page">
@@ -99,7 +107,7 @@ export function HomeScreen() {
             </div>
             <Ring value={storagePct} color="var(--green)" size={78} stroke={7} />
             <div className="metric-sub">
-              {rootMount ? `${storageUsedGb} / ${storageTotalGb} GB` : 'unavailable'}
+              {rootGroup ? `${formatGb(storageUsedGb)} / ${formatGb(storageTotalGb)} GB` : 'unavailable'}
             </div>
           </div>
         </div>
@@ -144,7 +152,16 @@ export function HomeScreen() {
 
       <SectionTitle>Quick access</SectionTitle>
       <div className="card-list">
-        <QuickItem icon={<IconDrive size={19} />} label="Drive info" sub={rootMount ? `${storage?.mounts.length ?? 0} filesystems · ${rootMount.mountpoint} at ${storagePct}%` : 'All drives & partitions'} to={{ name: 'drives', title: 'Drive info' }} />
+        <QuickItem
+          icon={<IconDrive size={19} />}
+          label="Drive info"
+          sub={
+            rootGroup
+              ? `${groups.length} ${groups.length === 1 ? 'drive' : 'drives'} · ${rootGroup.id} at ${storagePct}%`
+              : 'All drives & partitions'
+          }
+          to={{ name: 'drives', title: 'Drive info' }}
+        />
         <QuickItem icon={<IconServer size={19} />} label="Endpoints" sub={`${endpoints.length} configured`} to={{ name: 'endpoints', title: 'Endpoints' }} />
         <QuickItem icon={<IconUsers size={19} />} label="Users & teams" sub="Access control" to={{ name: 'users', title: 'Users' }} />
         <QuickItem icon={<IconDatabase size={19} />} label="Volumes" sub={`${dashboard.volumes} volumes`} to={{ name: 'volumes', title: 'Volumes' }} />

@@ -24,6 +24,7 @@ import type {
   DashboardStats,
   DockerDiskUsage,
   Endpoint,
+  HostMount,
   HostStorage,
   Image,
   ImageInfo,
@@ -221,13 +222,56 @@ export function getEndpoints(): Promise<Endpoint[]> {
 // whether or not a Portainer connection is configured. Returns null when the
 // file isn't served (e.g. running `vite dev` with no container in front) so
 // callers can fall back to demo data instead of erroring.
+/** Shape the entrypoint actually writes: sizes in KiB (see the generator). */
+interface RawHostMount {
+  filesystem?: string
+  mountpoint?: string
+  disk?: string
+  totalKb?: number
+  usedKb?: number
+  availKb?: number
+  // Older builds emitted byte counts; still read them so a cached page keeps
+  // working against a container that hasn't been updated yet.
+  totalBytes?: number
+  usedBytes?: number
+  availBytes?: number
+  usedPercent?: number
+}
+
+const kB = (kb: unknown, bytesFallback?: unknown): number => {
+  const n = typeof kb === 'number' && isFinite(kb) ? kb : undefined
+  if (n !== undefined) return Math.max(0, n) * 1024
+  const b = typeof bytesFallback === 'number' && isFinite(bytesFallback) ? bytesFallback : 0
+  return Math.max(0, b)
+}
+
 export async function getStorage(): Promise<HostStorage | null> {
   try {
     const res = await fetch('/storage.json', { cache: 'no-store' })
     if (!res.ok) return null
-    const data = (await res.json()) as HostStorage
+    const data = (await res.json()) as { generatedAt?: number; host?: string; mounts?: RawHostMount[] }
     if (!data || !Array.isArray(data.mounts)) return null
-    return data
+    const mounts: HostMount[] = data.mounts.map((m) => {
+      const totalBytes = kB(m.totalKb, m.totalBytes)
+      const usedBytes = kB(m.usedKb, m.usedBytes)
+      const availBytes = kB(m.availKb, m.availBytes)
+      const reported = typeof m.usedPercent === 'number' && isFinite(m.usedPercent) ? m.usedPercent : null
+      // Recompute from the byte counts when they're usable: df's own percentage
+      // rounds to whole numbers and can disagree by a point, and a mount whose
+      // counters were clamp/overflow-affected would otherwise show a stale
+      // figure next to a correct total.
+      const computed = totalBytes > 0 ? (usedBytes / totalBytes) * 100 : 0
+      return {
+        filesystem: m.filesystem || '',
+        mountpoint: m.mountpoint || '',
+        disk: m.disk || '',
+        totalBytes,
+        usedBytes,
+        availBytes,
+        usedPercent: Math.max(0, Math.min(100, reported ?? computed)),
+      }
+    })
+    return { generatedAt: data.generatedAt || Date.now(), host: data.host || '', mounts }
   } catch {
     return null
   }

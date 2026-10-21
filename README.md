@@ -146,6 +146,8 @@ The dashboard's **Storage** dial and the **Drive info** screen show the disk the
 
 - The container root filesystem is the host's overlay backing store, so `df /` reports the **main drive** — that's the dial's default.
 - To also list the host's other partitions, bind-mount the host root into the container and the extra mounts appear on the Drive info screen. The app falls back to a demo snapshot when the file isn't served (local dev / preview).
+- The screen is **grouped by physical drive**, not by mount. One drive normally shows up several times in `df` (root overlay, an LVM volume, `/boot/efi`), so raw mounts report the same capacity repeatedly; the entrypoint resolves each filesystem to its backing disk via `/sys/class/block` (`nvme0n1p2` → `nvme0n1`, a device-mapper volume walks its `slaves`, a RAID set joins them as `sda+sdb`) and the UI folds those mounts into one card. A device-less root (the container's overlay) is folded into the physical group reporting identical capacity and usage, so it lands on the disk that actually backs it.
+- **Sizes are emitted in KiB, not bytes.** Busybox awk — the awk in the alpine nginx image — prints `%d` through a 32-bit int, so `kB * 1024` overflowed above ~2 GB and wrote negative byte counts, which the UI rendered as `NaN undefined`. KiB fits, and the frontend multiplies by 1024 in JS. `bytes()` also guards non-finite/negative input now, so no code path can print that string again.
 
 Docker's own storage breakdown (`docker system df` — images, containers, volumes, build cache and what's reclaimable) is shown on the same screen, summed from the active endpoint.
 
