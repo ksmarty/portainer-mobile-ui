@@ -420,6 +420,24 @@ a {
   background: currentColor;
 }
 
+/* A pill used as a tap target (e.g. a stack's status). The pill itself is only
+   9.5px tall, so the hit area is grown with padding and a negative margin: it
+   is easy to hit without moving the pill inside the row. */
+.pill-hit {
+  background: none;
+  border: 0;
+  padding: 10px 2px;
+  margin: -10px -2px -10px 0;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  flex: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.pill-hit:active .pill {
+  filter: brightness(1.25);
+}
+
 .tag {
   display: inline-flex;
   align-items: center;

@@ -10,6 +10,7 @@ import {
   demoGetImageInfo,
   demoGetNetworkInfo,
   demoPullImage,
+  demoPullVersion,
   demoRecreateContainer,
   demoRemoveContainer,
   demoRemoveImage,
@@ -814,6 +815,40 @@ export interface PullResult {
   status: string
   /** Content digest Docker reported, when present. */
   digest?: string
+  /**
+   * Value of the image's `org.opencontainers.image.version` label, when it
+   * declares one. The pull stream never carries labels, so this is read back
+   * from the image the tag now points at — a digest tells the user nothing,
+   * a declared version tells them what they just got.
+   */
+  version?: string
+}
+
+/** Compare image references loosely: drop a docker.io/library prefix and default tag. */
+function refKey(ref: string): string {
+  let r = ref.trim().toLowerCase()
+  r = r.replace(/^docker\.io\//, '').replace(/^library\//, '')
+  const at = r.indexOf('@')
+  if (at >= 0) r = r.slice(0, at)
+  const slash = r.lastIndexOf('/')
+  const colon = r.lastIndexOf(':')
+  if (colon <= slash) r += ':latest'
+  return r
+}
+
+// Docker's pull stream carries no metadata about what came down. The tag now
+// points at the new image, so list images and read its config for the OCI
+// version label. Best effort by design: no label, no network, or a slow
+// inspect all mean "keep showing the digest".
+async function pullImageVersion(endpointId: number, ref: string): Promise<string | undefined> {
+  const want = refKey(ref)
+  const images = await portainerFetch<any[]>(dockerPath(endpointId, '/images/json')).catch(() => null)
+  if (!Array.isArray(images)) return undefined
+  const hit = images.find((i) => (i?.RepoTags || []).some((t: string) => refKey(t) === want))
+  if (!hit?.Id) return undefined
+  const info = await getImageInfo(endpointId, hit.Id).catch(() => null)
+  const label = info?.Labels?.['org.opencontainers.image.version']
+  return typeof label === 'string' && label.trim() ? label.trim() : undefined
 }
 
 // Docker streams newline-delimited JSON progress events for a pull. Mine the
@@ -859,6 +894,7 @@ export async function pullImage(endpointId: number, image: string): Promise<Pull
       upToDate: false,
       status: `Status: Downloaded newer image for ${ref}`,
       digest: 'sha256:000000000000',
+      version: demoPullVersion(ref),
     }
   }
   // Match Portainer's own frontend exactly: POST /images/create with the full
@@ -871,7 +907,13 @@ export async function pullImage(endpointId: number, image: string): Promise<Pull
     { fromImage: ref },
   )
   const text = await res.text().catch(() => '')
-  return parsePullResult(ref, text)
+  const parsed = parsePullResult(ref, text)
+  if (!parsed.upToDate) {
+    // Only for a pull that actually changed the tag: an up-to-date pull keeps
+    // its plain "already the latest version" message.
+    parsed.version = await pullImageVersion(endpointId, ref)
+  }
+  return parsed
 }
 
 // Detailed metadata for one network (docker inspect).

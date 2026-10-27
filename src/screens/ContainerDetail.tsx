@@ -356,10 +356,6 @@ function UpdateConfirm({
           />
           <span>
             <span className="t">Remove the old image afterwards</span>
-            <span className="d">
-              The image the container runs today is deleted once it is unused, so the update does not leave an
-              untagged layer behind. Skipped if another container still needs it.
-            </span>
           </span>
         </label>
         {busy && (

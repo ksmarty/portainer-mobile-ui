@@ -728,6 +728,18 @@ export function demoPullImage(name: string) {  demoState.images.unshift({
   })
 }
 
+// Demo mirror of the OCI version label: a few tags pretend to declare one so
+// the pull alert can be seen showing a version instead of a digest.
+const DEMO_IMAGE_VERSIONS: Record<string, string> = {
+  'nginx:latest': '1.27.3',
+  'redis:latest': '7.4.1',
+  'postgres:latest': '17.2',
+}
+
+export function demoPullVersion(name: string): string | undefined {
+  return DEMO_IMAGE_VERSIONS[name] ?? undefined
+}
+
 export function demoRemoveImage(id: string) {
   demoState.images = demoState.images.filter((i) => i.Id !== id)
 }

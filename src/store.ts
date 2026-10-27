@@ -180,8 +180,14 @@ function pullToast(r: PullResult): { message: string; kind: 'success' | 'info' }
   if (r.upToDate) {
     return { message: `${r.image} is already the latest version`, kind: 'info' }
   }
-  const d = r.digest ? ` · ${r.digest.replace(/^sha256:/, '').slice(0, 12)}` : ''
-  return { message: `Fetched ${r.image}${d}`, kind: 'success' }
+  // Prefer the version the image declares over its digest: "ghcr.io/x:v1.2.3"
+  // means something to the reader, a 12-character hash does not.
+  const detail = r.version
+    ? ` · v${r.version.replace(/^v(?=\d)/i, '')}`
+    : r.digest
+      ? ` · ${r.digest.replace(/^sha256:/, '').slice(0, 12)}`
+      : ''
+  return { message: `Fetched ${r.image}${detail}`, kind: 'success' }
 }
 
 // Some containers report their image as a bare id, and once a newer image has

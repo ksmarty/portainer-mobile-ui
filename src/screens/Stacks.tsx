@@ -28,7 +28,18 @@ export function StacksScreen() {
               }
               title={s.Name}
               sub={`${timeAgo(s.CreationDate)} · ${s.CreatedBy || 'unknown'}`}
-              right={<Pill color={s.Status === 1 ? 'var(--green)' : 'var(--amber)'}>{s.Status === 1 ? 'active' : 'inactive'}</Pill>}
+              right={
+                <button
+                  type="button"
+                  className="pill-hit"
+                  aria-label={`Open stack ${s.Name}`}
+                  onClick={() => navigate({ name: 'stack-detail', title: s.Name, props: { id: s.Id } })}
+                >
+                  <Pill color={s.Status === 1 ? 'var(--green)' : 'var(--amber)'}>
+                    {s.Status === 1 ? 'active' : 'inactive'}
+                  </Pill>
+                </button>
+              }
             />
           ))}
           {!stacks.length && <Empty icon={<IconStack size={40} />} title="No stacks" sub="Deploy a compose file to get started" />}
