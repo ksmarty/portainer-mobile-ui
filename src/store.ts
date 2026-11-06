@@ -46,7 +46,7 @@ import {
 } from './lib/api'
 import type { PullResult } from './lib/api'
 import { extractComposeImages, composeImageForService } from './lib/compose'
-import { resolveContainerImage, stackForContainer, stripSha } from './lib/containerRefs'
+import { containerImageState, resolveContainerImage, stackForContainer, stripSha } from './lib/containerRefs'
 import { demoAddEndpoint, demoAddTeam, demoAddUser, demoHostStorage, demoRemoveTeam, demoRemoveUser } from './lib/demo'
 import { loadCleanupJob, beatCleanup, claimCleanup, releaseCleanup, readCleanupJob, clearCleanupJob } from './lib/cleanup'
 import type {
@@ -692,8 +692,28 @@ export const useApp = create<AppState>((set, get) => ({
         throw new Error(`No image tag found for ${c.Image || 'this container'} — it may no longer exist on the host`)
       }
       onProgress?.(`Pulling ${ref}…`)
-      const t = pullToast(await pullImage(ep, ref))
+      const pulled = await pullImage(ep, ref)
+      const t = pullToast(pulled)
       get().toast(t.message, t.kind)
+
+      // Nothing to apply? Two ways that happens, and both must skip the
+      // redeploy — restarting a stack for no reason is a real outage:
+      //   1. the pull reported the tag was already current, and
+      //   2. the container is already running the image that tag points at.
+      // (2) matters on its own: a pull that happened earlier — from the Images
+      // screen, or a previous update that failed after pulling — leaves the tag
+      // current while the container still runs the old image. In that case the
+      // pull says "up to date" but the container genuinely needs recreating, so
+      // the state check is what decides, not the pull result alone.
+      if (pulled.upToDate) {
+        const fresh = await getImages(ep, true).catch(() => get().images)
+        if (containerImageState(c, fresh) === 'current') {
+          onProgress?.('Already up to date')
+          get().toast(`${ref} is already running the latest image — nothing to update`, 'info')
+          return
+        }
+      }
+
       if (stack) {
         onProgress?.(`Redeploying stack ${stack.Name}…`)
         const file = await getStackFile(stack.Id)

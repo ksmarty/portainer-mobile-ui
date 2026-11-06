@@ -717,7 +717,14 @@ export function demoGetImageInfo(imageId: string): ImageInfo {
   }
 }
 
-export function demoPullImage(name: string) {  demoState.images.unshift({
+/**
+ * Mirror a pull. Returns true when the tag was already present — the demo
+ * equivalent of Docker's "Image is up to date", which the update flow uses to
+ * decide whether a redeploy is needed at all.
+ */
+export function demoPullImage(name: string): boolean {
+  if (demoState.images.some((i) => i.RepoTags?.includes(name))) return true
+  demoState.images.unshift({
     Id: uid('img'),
     RepoTags: [name],
     Created: now,
@@ -726,6 +733,7 @@ export function demoPullImage(name: string) {  demoState.images.unshift({
     Architecture: 'amd64',
     Os: 'linux',
   })
+  return false
 }
 
 // Demo mirror of the OCI version label: a few tags pretend to declare one so

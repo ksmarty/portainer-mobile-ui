@@ -742,11 +742,18 @@ export function getContainerStats(endpointId: number, id: string): Promise<Stats
 
 /* -------------------------------- images --------------------------------- */
 
-export function getImages(endpointId: number): Promise<Image[]> {
+/**
+ * The endpoint's images. `fresh` bypasses the short read cache — needed when the
+ * answer decides whether to act (e.g. "is this container already on the image
+ * the tag points at?"), where a list captured before a pull would be wrong.
+ */
+export function getImages(endpointId: number, fresh = false): Promise<Image[]> {
   if (isDemo()) return demoDelay(demoGet<Image[]>('images'))
   const key = cacheKey(dockerPath(endpointId, '/images/json'))
-  const cached = getCache<Image[]>(key)
-  if (cached) return Promise.resolve(cached)
+  if (!fresh) {
+    const cached = getCache<Image[]>(key)
+    if (cached) return Promise.resolve(cached)
+  }
   return portainerFetch<Image[]>(dockerPath(endpointId, '/images/json')).then((d) => setCache(key, d, 5000))
 }
 
@@ -887,14 +894,14 @@ function parsePullResult(image: string, text: string): PullResult {
 export async function pullImage(endpointId: number, image: string): Promise<PullResult> {
   const ref = image.trim()
   if (isDemo()) {
-    demoPullImage(ref)
+    const upToDate = demoPullImage(ref)
     await demoDelay(undefined, 700)
     return {
       image: ref,
-      upToDate: false,
-      status: `Status: Downloaded newer image for ${ref}`,
-      digest: 'sha256:000000000000',
-      version: demoPullVersion(ref),
+      upToDate,
+      status: upToDate ? `Status: Image is up to date for ${ref}` : `Status: Downloaded newer image for ${ref}`,
+      digest: upToDate ? undefined : 'sha256:000000000000',
+      version: upToDate ? undefined : demoPullVersion(ref),
     }
   }
   // Match Portainer's own frontend exactly: POST /images/create with the full
