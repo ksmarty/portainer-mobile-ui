@@ -119,6 +119,14 @@ a {
   position: relative;
 }
 
+/* A modal or sheet is open. Overlays are rendered *inside* .app-scroll, so a
+   touch or wheel event on one would otherwise chain to the page underneath and
+   scroll it away. Freezing the container stops that; the sheet's own
+   overflow-y still scrolls because a descendant scroller is independent. */
+body.modal-open .app-scroll {
+  overflow: hidden;
+}
+
 .page {
   padding: 0 10px calc(18px + var(--safe-bottom));
   animation: fade 0.18s ease;
@@ -512,11 +520,43 @@ a {
 
 .btn-row {
   display: flex;
+  /* Buttons keep their own height: a tip column may grow below one of them. */
+  align-items: flex-start;
   gap: 8px;
   margin-top: 8px;
 }
-.btn-row > .btn {
+.btn-row > .btn,
+.btn-row > .tip-host {
   flex: 1;
+}
+
+/* A button that explains itself while disabled (see TipButton). The wrapper
+   owns the tap because the disabled button itself is pointer-events: none. */
+.tip-host {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.tip-host > .btn {
+  flex: 1;
+}
+
+/* The hint sits in the flow under its button rather than floating over it:
+   every overlap attempt ended up painted under the next button row (or
+   clipped by the shell), and a short line that pushes the row down is clearer
+   on a phone anyway. */
+.tip-bubble {
+  padding: 6px 9px;
+  border-radius: 9px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: left;
+  animation: fade 0.14s ease;
 }
 
 /* ------------------------------ forms ------------------------------ */
@@ -1086,6 +1126,8 @@ a {
   align-items: flex-end;
   justify-content: center;
   animation: fade 0.15s ease;
+  /* Keep an over-scroll at the end of the sheet from dragging the page. */
+  overscroll-behavior: contain;
 }
 
 .sheet {

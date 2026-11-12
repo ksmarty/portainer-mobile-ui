@@ -35,6 +35,54 @@ export function Skeleton({ h = 60, r = 16, style }: { h?: number; r?: number; st
   return <div className="skeleton" style={{ height: h, borderRadius: r, ...style }} />
 }
 
+/**
+ * A button that can say why it is disabled. A disabled button is
+ * `pointer-events: none`, so the tap can never reach it — the wrapper takes the
+ * tap and opens a short bubble above the button instead. Renamed nothing: it
+ * still renders a plain `.btn` so it drops into a `.btn-row` unchanged.
+ */
+export function TipButton({
+  icon,
+  label,
+  disabled = false,
+  hint,
+  onClick,
+}: {
+  icon?: ReactNode
+  label: string
+  disabled?: boolean
+  hint: string
+  onClick?: () => void
+}) {
+  const [shown, setShown] = useState(false)
+  const timer = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(timer.current), [])
+  const reveal = () => {
+    window.clearTimeout(timer.current)
+    setShown(true)
+    timer.current = window.setTimeout(() => setShown(false), 2400)
+  }
+  return (
+    <span className="tip-host" onClick={disabled ? reveal : undefined}>
+      <button
+        type="button"
+        className="btn"
+        disabled={disabled}
+        aria-disabled={disabled}
+        onClick={disabled ? undefined : onClick}
+      >
+        {icon}
+        {label}
+      </button>
+      {shown && (
+        <span className="tip-bubble" role="status">
+          {hint}
+        </span>
+      )}
+    </span>
+  )
+}
+
 export function Empty({ icon, title, sub }: { icon?: ReactNode; title: string; sub?: string }) {
   return (
     <div className="empty">

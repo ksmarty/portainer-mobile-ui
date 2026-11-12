@@ -191,7 +191,7 @@ Workflows live in `.github/workflows/`, following the pattern used by [ksmarty/v
 - **`ci.yml`** — runs on every pull request to `master`: builds the frontend and verifies the Docker image builds (`linux/amd64`). The build output is cached with `type=gha` so repeat runs are fast.
 - **`release.yml`** — runs on pushes to `master` (and manually). It:
   1. Computes the next semver tag from conventional commits since the last tag (`feat:` → minor, `feat!:`/`BREAKING CHANGE` → major, anything else → patch). Manual runs use the bump you pick instead. No commits → no release.
-  2. Builds a multi-arch image (`linux/amd64` + `linux/arm64`) and pushes it to **`ghcr.io/ksmarty/portainer-mobile-ui`**, tagged with the new version and `latest`.
+  2. Builds the image (`linux/amd64`) and pushes it to **`ghcr.io/ksmarty/portainer-mobile-ui`**, tagged with the new version and `latest`. Only amd64 is built: the arm64 leg ran under QEMU emulation and repeatedly blew the job timeout, and nothing in the image is architecture-specific.
   3. Creates a GitHub Release with auto-generated notes.
 
 The release tag and commit SHA are passed as `VERSION`/`COMMIT` build-args and baked into the image at `/version.json`.

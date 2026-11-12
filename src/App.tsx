@@ -86,6 +86,23 @@ export default function App() {
     }
   }, [ready, resumeImageCleanup, syncCleanupFromStorage])
 
+  // Freeze the page behind a modal or sheet. The overlays are rendered inside
+  // .app-scroll, so without this a drag on the backdrop scrolls the screen
+  // underneath. Watching the DOM for .overlay covers every modal in the app —
+  // including ones added later — instead of making each one remember to lock.
+  useEffect(() => {
+    const sync = () => {
+      document.body.classList.toggle('modal-open', document.querySelector('.overlay') !== null)
+    }
+    const mo = new MutationObserver(sync)
+    mo.observe(document.body, { childList: true, subtree: true })
+    sync()
+    return () => {
+      mo.disconnect()
+      document.body.classList.remove('modal-open')
+    }
+  }, [])
+
   // Scroll to the top whenever the route changes (e.g. tapping a container in
   // a stack shouldn't inherit the stack page's scroll position).
   useEffect(() => {

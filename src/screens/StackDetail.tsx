@@ -14,7 +14,7 @@ import {
   IconStop,
   IconTrash,
 } from '../components/Icons'
-import { Empty, KV, ListItem, Pill, SectionTitle, Spinner } from '../components/ui'
+import { Empty, KV, ListItem, Pill, SectionTitle, Spinner, TipButton } from '../components/ui'
 import { copyText, portLabel, stateColor, stateLabel, timeAgo } from '../lib/utils'
 import type { Container } from '../lib/types'
 import { containerImageLabel, containerImageState } from '../lib/containerRefs'
@@ -86,9 +86,13 @@ export function StackDetailScreen({ id, fileOverride }: { id: number; fileOverri
           </div>
 
           <div className="btn-row">
-            <button className="btn" onClick={() => void doStackAction(stack.Id, 'start')}>
-              <IconPlay size={15} /> Start
-            </button>
+            <TipButton
+              icon={<IconPlay size={15} />}
+              label="Start"
+              disabled={stack.Status === 1}
+              hint="This stack is already running — stop it first to restart it"
+              onClick={() => void doStackAction(stack.Id, 'start')}
+            />
             <button className="btn" onClick={() => void doStackAction(stack.Id, 'stop')}>
               <IconStop size={15} /> Stop
             </button>
